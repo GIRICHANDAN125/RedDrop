@@ -1,0 +1,12 @@
+node_modules
+backend/node_modules
+frontend/node_modules
+dist
+build
+coverage
+logs
+.expo
+.expo-shared
+backend/.env
+frontend/.env
+*.log
