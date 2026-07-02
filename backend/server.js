@@ -14,7 +14,7 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
-const connectDB = require('./config/database');
+const { connectDB } = require('./config/database');
 const { initSocket } = require('./config/socket');
 
 // Route imports

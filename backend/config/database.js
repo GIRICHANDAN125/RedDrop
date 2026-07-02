@@ -1,29 +1,26 @@
-const mongoose = require('mongoose');
+const mysql = require('mysql2/promise');
+require('dotenv').config();
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'reddrop_ai',
+  port: process.env.DB_PORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
 
 const connectDB = async () => {
   try {
-    const mongoUri = process.env.MONGODB_URI;
-
-    if (!mongoUri) {
-      throw new Error('MONGODB_URI is not defined. Check backend/.env and restart the server.');
-    }
-
-    const conn = await mongoose.connect(mongoUri);
-
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-
-    mongoose.connection.on('error', (err) => {
-      console.error('MongoDB connection error:', err);
-    });
-
-    mongoose.connection.on('disconnected', () => {
-      console.warn('MongoDB disconnected. Attempting to reconnect...');
-    });
-
+    const connection = await pool.getConnection();
+    console.log(`✅ MySQL Connected: ${connection.config.host}`);
+    connection.release();
   } catch (error) {
-    console.error('❌ MongoDB Connection Failed:', error.message);
+    console.error('❌ MySQL Connection Failed:', error.message);
     process.exit(1);
   }
 };
 
-module.exports = connectDB;
+module.exports = { pool, connectDB };

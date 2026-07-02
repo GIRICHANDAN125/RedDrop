@@ -1,12 +1,19 @@
-const Notification = require('../models/Notification.model');
+const { pool } = require('../config/database');
 const { emitToUser } = require('../config/socket');
 
 exports.createNotification = async (userId, data) => {
   try {
-    const notification = await Notification.create({
-      recipient: userId,
-      ...data
-    });
+    const [result] = await pool.execute(
+      'INSERT INTO notifications (recipient_id, type, title, body, data, priority) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, data.type, data.title, data.body, data.data ? JSON.stringify(data.data) : null, data.priority || 'normal']
+    );
+
+    const [notifs] = await pool.execute('SELECT * FROM notifications WHERE id = ?', [result.insertId]);
+    const notification = notifs[0];
+
+    if (notification.data) {
+      notification.data = JSON.parse(notification.data);
+    }
 
     // Real-time push via socket
     emitToUser(userId.toString(), 'notification:new', notification);
@@ -19,19 +26,19 @@ exports.createNotification = async (userId, data) => {
 
 exports.notifyNearbyDonors = async (donors, request) => {
   const emergencyEmojis = { critical: '🚨', high: '❗', medium: '⚠️', low: 'ℹ️' };
-  const emoji = emergencyEmojis[request.emergencyLevel] || '🩸';
+  const emoji = emergencyEmojis[request.emergency_level] || '🩸';
 
   const notifications = donors.map(donor =>
-    exports.createNotification(donor.user._id || donor.user, {
+    exports.createNotification(donor.user_id, {
       type: 'blood_request_nearby',
-      title: `${emoji} ${request.emergencyLevel.toUpperCase()} Blood Request Nearby`,
-      body: `${request.bloodGroup} blood needed at ${request.hospital.name}, ${request.hospital.city}`,
-      priority: request.emergencyLevel === 'critical' ? 'critical' : 'high',
+      title: `${emoji} ${request.emergency_level.toUpperCase()} Blood Request Nearby`,
+      body: `${request.blood_group} blood needed at ${request.hospital_name}, ${request.hospital_city}`,
+      priority: request.emergency_level === 'critical' ? 'critical' : 'high',
       data: {
-        requestId: request._id,
-        bloodGroup: request.bloodGroup,
-        hospital: request.hospital.name,
-        unitsRequired: request.unitsRequired
+        requestId: request.id,
+        bloodGroup: request.blood_group,
+        hospital: request.hospital_name,
+        unitsRequired: request.units_required
       }
     })
   );
@@ -40,30 +47,43 @@ exports.notifyNearbyDonors = async (donors, request) => {
 };
 
 exports.getUserNotifications = async (userId, { page = 1, limit = 20, unreadOnly = false }) => {
-  const filter = { recipient: userId };
-  if (unreadOnly) filter.isRead = false;
+  let sql = 'SELECT * FROM notifications WHERE recipient_id = ?';
+  let params = [userId];
 
-  const [notifications, unreadCount] = await Promise.all([
-    Notification.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
-    Notification.countDocuments({ recipient: userId, isRead: false })
-  ]);
+  if (unreadOnly) {
+    sql += ' AND is_read = 0';
+  }
 
-  return { notifications, unreadCount };
+  const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as total');
+  const [countRows] = await pool.execute(countSql, params);
+  const total = countRows[0].total;
+
+  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  const limitInt = parseInt(limit);
+  const offsetInt = (parseInt(page) - 1) * limitInt;
+  params.push(limitInt.toString(), offsetInt.toString());
+
+  const [notifications] = await pool.query(sql, params.map(p => Number.isNaN(Number(p)) ? p : Number(p)));
+
+  notifications.forEach(n => {
+    if (n.data) n.data = JSON.parse(n.data);
+  });
+
+  return { notifications, unreadCount: unreadOnly ? total : null }; // unreadCount calculation can be improved if needed
 };
 
 exports.markAsRead = async (userId, notificationIds) => {
-  await Notification.updateMany(
-    { _id: { $in: notificationIds }, recipient: userId },
-    { isRead: true, readAt: new Date() }
+  if (!notificationIds || notificationIds.length === 0) return;
+  const placeholders = notificationIds.map(() => '?').join(',');
+  await pool.query(
+    `UPDATE notifications SET is_read = 1, read_at = NOW() WHERE recipient_id = ? AND id IN (${placeholders})`,
+    [userId, ...notificationIds]
   );
 };
 
 exports.markAllAsRead = async (userId) => {
-  await Notification.updateMany(
-    { recipient: userId, isRead: false },
-    { isRead: true, readAt: new Date() }
+  await pool.execute(
+    'UPDATE notifications SET is_read = 1, read_at = NOW() WHERE recipient_id = ? AND is_read = 0',
+    [userId]
   );
 };

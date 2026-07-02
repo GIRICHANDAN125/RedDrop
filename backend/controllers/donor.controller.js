@@ -1,9 +1,7 @@
-const Donor = require('../models/Donor.model');
-const User = require('../models/User.model');
+const { pool } = require('../config/database');
 const { priorityQueue } = require('../utils/dsa.utils');
 
 // GET /api/donors/nearby
-// DSA: Uses MongoDB geospatial index (Graph-based nearest neighbor search)
 exports.getNearbyDonors = async (req, res) => {
   try {
     const {
@@ -17,37 +15,34 @@ exports.getNearbyDonors = async (req, res) => {
       return res.status(400).json({ error: 'Location coordinates required.' });
     }
 
-    // Build blood group compatibility query
-    // DSA: Uses hash map for O(1) compatible type lookup
+    const maxDistanceKm = maxDistance / 1000;
     const compatibleGroups = getCompatibleBloodGroups(bloodGroup);
 
-    const query = {
-      'availability.isAvailable': true,
-      'medicalHistory.isFitToDonate': true,
-      location: {
-        $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(longitude), parseFloat(latitude)]
-          },
-          $maxDistance: parseInt(maxDistance)
-        }
-      }
-    };
+    let sql = `
+      SELECT d.*, u.name, u.phone, u.avatar_url, u.rating_average, u.total_donations, u.last_seen, u.location_lat, u.location_lng,
+             (6371 * acos(cos(radians(?)) * cos(radians(u.location_lat)) * cos(radians(u.location_lng) - radians(?)) + sin(radians(?)) * sin(radians(u.location_lat)))) AS distance
+      FROM donors d
+      JOIN users u ON d.user_id = u.id
+      WHERE d.is_available = 1 AND d.is_fit_to_donate = 1
+    `;
+    
+    let params = [parseFloat(latitude), parseFloat(longitude), parseFloat(latitude)];
 
-    if (bloodGroup) {
-      query.bloodGroup = { $in: compatibleGroups };
+    if (bloodGroup && compatibleGroups.length > 0) {
+      const placeholders = compatibleGroups.map(() => '?').join(',');
+      sql += ` AND u.blood_group IN (${placeholders})`;
+      params.push(...compatibleGroups);
     }
 
-    const donors = await Donor.find(query)
-      .limit(parseInt(limit))
-      .populate('user', 'name phone avatar rating totalDonations badges lastSeen')
-      .lean();
+    sql += ` HAVING distance <= ? ORDER BY distance ASC LIMIT ?`;
+    params.push(maxDistanceKm, parseInt(limit));
+
+    const [donors] = await pool.execute(sql, params);
 
     // DSA: Priority Queue sort by urgency score (distance + response rate + availability)
     const scoredDonors = donors.map(donor => ({
       ...donor,
-      score: calculateDonorScore(donor, parseFloat(latitude), parseFloat(longitude))
+      score: calculateDonorScore(donor, donor.distance)
     }));
 
     // Sort by score descending (best match first)
@@ -65,30 +60,45 @@ exports.getNearbyDonors = async (req, res) => {
 };
 
 // GET /api/donors/search
-// DSA: Trie-like prefix search via MongoDB regex + sorting
 exports.searchDonors = async (req, res) => {
   try {
     const { query, bloodGroup, city, state, available } = req.query;
 
-    const filter = {};
-    if (bloodGroup) filter.bloodGroup = bloodGroup;
-    if (city) filter['location.city'] = new RegExp(city, 'i');
-    if (state) filter['location.state'] = new RegExp(state, 'i');
-    if (available === 'true') filter['availability.isAvailable'] = true;
+    let sql = `
+      SELECT d.*, u.name, u.phone, u.avatar_url, u.rating_average, u.total_donations
+      FROM donors d
+      JOIN users u ON d.user_id = u.id
+      WHERE 1=1
+    `;
+    let params = [];
 
-    let donorQuery = Donor.find(filter)
-      .populate({
-        path: 'user',
-        select: 'name phone avatar rating totalDonations badges',
-        ...(query ? { match: { name: new RegExp(query, 'i') } } : {})
-      })
-      .limit(50);
+    if (bloodGroup) {
+      sql += ` AND u.blood_group = ?`;
+      params.push(bloodGroup);
+    }
+    if (city) {
+      sql += ` AND u.city LIKE ?`;
+      params.push(`%${city}%`);
+    }
+    if (state) {
+      sql += ` AND u.state LIKE ?`;
+      params.push(`%${state}%`);
+    }
+    if (available === 'true') {
+      sql += ` AND d.is_available = 1`;
+    }
+    if (query) {
+      sql += ` AND u.name LIKE ?`;
+      params.push(`%${query}%`);
+    }
 
-    const donors = await donorQuery.lean();
-    const filtered = donors.filter(d => d.user !== null);
+    sql += ` LIMIT 50`;
 
-    res.json({ success: true, count: filtered.length, donors: filtered });
+    const [donors] = await pool.execute(sql, params);
+
+    res.json({ success: true, count: donors.length, donors });
   } catch (error) {
+    console.error('Search error:', error);
     res.status(500).json({ error: 'Search failed.' });
   }
 };
@@ -96,11 +106,13 @@ exports.searchDonors = async (req, res) => {
 // GET /api/donors/profile
 exports.getMyDonorProfile = async (req, res) => {
   try {
-    const donor = await Donor.findOne({ user: req.user._id })
-      .populate('user', '-password -otp');
+    const [donors] = await pool.execute(
+      'SELECT d.*, u.name, u.email, u.phone, u.blood_group, u.city FROM donors d JOIN users u ON d.user_id = u.id WHERE d.user_id = ?',
+      [req.user.id]
+    );
 
-    if (!donor) return res.status(404).json({ error: 'Donor profile not found.' });
-    res.json({ success: true, donor });
+    if (donors.length === 0) return res.status(404).json({ error: 'Donor profile not found.' });
+    res.json({ success: true, donor: donors[0] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch donor profile.' });
   }
@@ -109,20 +121,28 @@ exports.getMyDonorProfile = async (req, res) => {
 // PUT /api/donors/profile
 exports.updateDonorProfile = async (req, res) => {
   try {
-    const updates = req.body;
-    const donor = await Donor.findOneAndUpdate(
-      { user: req.user._id },
-      { $set: updates },
-      { new: true, runValidators: true }
-    ).populate('user', '-password -otp');
+    const { hemoglobin_level, weight, age, emergency_contact_phone, city, blood_group } = req.body;
+    
+    let is_profile_complete = (blood_group && city && weight && age && emergency_contact_phone) ? 1 : 0;
 
-    if (!donor) return res.status(404).json({ error: 'Donor profile not found.' });
+    await pool.execute(
+      `UPDATE donors SET hemoglobin_level = ?, weight = ?, age = ?, emergency_contact_phone = ?, is_profile_complete = ? WHERE user_id = ?`,
+      [hemoglobin_level, weight, age, emergency_contact_phone, is_profile_complete, req.user.id]
+    );
 
-    // Check profile completeness
-    donor.isProfileComplete = checkProfileComplete(donor);
-    await donor.save();
+    if (city || blood_group) {
+      await pool.execute(
+        'UPDATE users SET city = COALESCE(?, city), blood_group = COALESCE(?, blood_group) WHERE id = ?',
+        [city, blood_group, req.user.id]
+      );
+    }
 
-    res.json({ success: true, message: 'Profile updated!', donor });
+    const [donors] = await pool.execute(
+      'SELECT d.*, u.name, u.city, u.blood_group FROM donors d JOIN users u ON d.user_id = u.id WHERE d.user_id = ?',
+      [req.user.id]
+    );
+
+    res.json({ success: true, message: 'Profile updated!', donor: donors[0] });
   } catch (error) {
     res.status(500).json({ error: 'Update failed.' });
   }
@@ -131,20 +151,20 @@ exports.updateDonorProfile = async (req, res) => {
 // PUT /api/donors/availability
 exports.toggleAvailability = async (req, res) => {
   try {
-    const { isAvailable, nextAvailableDate } = req.body;
-    const donor = await Donor.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        'availability.isAvailable': isAvailable,
-        ...(nextAvailableDate && { 'availability.nextAvailableDate': nextAvailableDate })
-      },
-      { new: true }
+    const { isAvailable } = req.body;
+    const isAvailInt = isAvailable ? 1 : 0;
+    
+    await pool.execute(
+      'UPDATE donors SET is_available = ? WHERE user_id = ?',
+      [isAvailInt, req.user.id]
     );
+
+    const [donors] = await pool.execute('SELECT is_available FROM donors WHERE user_id = ?', [req.user.id]);
 
     res.json({
       success: true,
       message: `You are now ${isAvailable ? 'available' : 'unavailable'} for donation.`,
-      availability: donor.availability
+      availability: donors[0].is_available === 1
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update availability.' });
@@ -154,11 +174,13 @@ exports.toggleAvailability = async (req, res) => {
 // GET /api/donors/:id
 exports.getDonorById = async (req, res) => {
   try {
-    const donor = await Donor.findById(req.params.id)
-      .populate('user', 'name avatar rating totalDonations badges');
+    const [donors] = await pool.execute(
+      'SELECT d.*, u.name, u.avatar_url, u.rating_average, u.total_donations FROM donors d JOIN users u ON d.user_id = u.id WHERE d.id = ?',
+      [req.params.id]
+    );
 
-    if (!donor) return res.status(404).json({ error: 'Donor not found.' });
-    res.json({ success: true, donor });
+    if (donors.length === 0) return res.status(404).json({ error: 'Donor not found.' });
+    res.json({ success: true, donor: donors[0] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch donor.' });
   }
@@ -166,7 +188,6 @@ exports.getDonorById = async (req, res) => {
 
 // ----- Helper DSA Functions -----
 
-// DSA: Hash map for blood group compatibility O(1)
 const bloodCompatibility = {
   'O-': ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+'],
   'O+': ['O+', 'A+', 'B+', 'AB+'],
@@ -178,7 +199,6 @@ const bloodCompatibility = {
   'AB+': ['AB+']
 };
 
-// Returns donor groups that CAN donate to the requested group
 function getCompatibleBloodGroups(recipientGroup) {
   if (!recipientGroup) return Object.keys(bloodCompatibility);
   return Object.entries(bloodCompatibility)
@@ -186,34 +206,12 @@ function getCompatibleBloodGroups(recipientGroup) {
     .map(([group]) => group);
 }
 
-// DSA: Scoring function (multi-criteria optimization)
-function calculateDonorScore(donor, lat, lng) {
-  const [dLng, dLat] = donor.location.coordinates;
-  const distance = getDistanceKm(lat, lng, dLat, dLng);
+function calculateDonorScore(donor, distance) {
   const distanceScore = Math.max(0, 100 - (distance * 5));
-  const responseScore = donor.stats?.responseRate || 50;
-  const lastDonationScore = donor.medicalHistory?.lastDonationDate
-    ? Math.min(100, (Date.now() - new Date(donor.medicalHistory.lastDonationDate)) / (1000 * 60 * 60 * 24))
+  const responseScore = donor.response_rate || 50;
+  const lastDonationScore = donor.last_donation_date
+    ? Math.min(100, (Date.now() - new Date(donor.last_donation_date)) / (1000 * 60 * 60 * 24))
     : 100;
 
   return (distanceScore * 0.5) + (responseScore * 0.3) + (lastDonationScore * 0.2);
-}
-
-// Haversine formula for distance
-function getDistanceKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLng/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function checkProfileComplete(donor) {
-  return !!(
-    donor.bloodGroup &&
-    donor.location?.city &&
-    donor.medicalHistory?.weight &&
-    donor.medicalHistory?.age &&
-    donor.emergencyContact?.phone
-  );
 }

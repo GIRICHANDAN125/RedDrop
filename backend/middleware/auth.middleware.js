@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User.model');
+const { pool } = require('../config/database');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -11,9 +11,15 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select('-password -otp');
-    if (!user) return res.status(401).json({ error: 'User not found.' });
-    if (!user.isActive) return res.status(403).json({ error: 'Account suspended.' });
+    const [rows] = await pool.execute(
+      'SELECT id, name, email, phone, role, is_active FROM users WHERE id = ?',
+      [decoded.id]
+    );
+
+    if (rows.length === 0) return res.status(401).json({ error: 'User not found.' });
+    
+    const user = rows[0];
+    if (!user.is_active) return res.status(403).json({ error: 'Account suspended.' });
 
     req.user = user;
     next();
@@ -40,9 +46,18 @@ const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) return next();
+    
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id).select('-password -otp');
+    
+    const [rows] = await pool.execute(
+      'SELECT id, name, email, phone, role, is_active FROM users WHERE id = ?',
+      [decoded.id]
+    );
+    
+    if (rows.length > 0) {
+      req.user = rows[0];
+    }
     next();
   } catch {
     next();

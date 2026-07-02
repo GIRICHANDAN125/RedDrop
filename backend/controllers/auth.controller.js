@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
-const User = require('../models/User.model');
-const Donor = require('../models/Donor.model');
+const bcrypt = require('bcryptjs');
+const { pool } = require('../config/database');
 const { sendEmail } = require('../services/email.service');
 const { createNotification } = require('../services/notification.service');
 
@@ -20,31 +19,36 @@ exports.register = async (req, res) => {
   try {
     const { name, email, phone, password, role, bloodGroup } = req.body;
 
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
+    const [existingUsers] = await pool.execute(
+      'SELECT id, email, phone FROM users WHERE email = ? OR phone = ?',
+      [email, phone]
+    );
+
+    if (existingUsers.length > 0) {
+      const existingUser = existingUsers[0];
       return res.status(409).json({
         error: existingUser.email === email ? 'Email already registered.' : 'Phone already registered.'
       });
     }
 
+    const hashedPassword = await bcrypt.hash(password, 12);
     const otp = generateOTP();
-    const user = await User.create({
-      name, email, phone, password, role,
-      bloodGroup: role === 'donor' ? bloodGroup : undefined,
-      otp: {
-        code: otp,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 min
-        purpose: 'email_verify'
-      }
-    });
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
+    const [result] = await pool.execute(
+      `INSERT INTO users (name, email, phone, password, role, blood_group, otp_code, otp_expires_at, otp_purpose) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, email, phone, hashedPassword, role, role === 'donor' ? bloodGroup : null, otp, otpExpiresAt, 'email_verify']
+    );
+
+    const userId = result.insertId;
 
     // Create donor profile if donor
     if (role === 'donor') {
-      await Donor.create({
-        user: user._id,
-        bloodGroup: bloodGroup || user.bloodGroup,
-        location: user.location
-      });
+      await pool.execute(
+        'INSERT INTO donors (user_id, blood_group) VALUES (?, ?)',
+        [userId, bloodGroup || null]
+      );
     }
 
     // Send OTP email
@@ -55,13 +59,15 @@ exports.register = async (req, res) => {
       data: { name, otp, purpose: 'Email Verification' }
     });
 
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(userId, role);
+
+    const [newUser] = await pool.execute('SELECT id, name, email, phone, role, blood_group, is_verified, is_active FROM users WHERE id = ?', [userId]);
 
     res.status(201).json({
       success: true,
       message: 'Registration successful! Please verify your email.',
       token,
-      user: user.toJSON(),
+      user: newUser[0],
       requiresVerification: true
     });
   } catch (error) {
@@ -75,25 +81,38 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email }).select('+password');
-    if (!user || !(await user.comparePassword(password))) {
+    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    
+    if (users.length === 0) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    if (!user.isActive) {
+    const user = users[0];
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    if (!user.is_active) {
       return res.status(403).json({ error: 'Your account has been suspended.' });
     }
 
-    user.lastSeen = new Date();
-    await user.save({ validateBeforeSave: false });
+    await pool.execute('UPDATE users SET last_seen = NOW() WHERE id = ?', [user.id]);
 
-    const token = generateToken(user._id, user.role);
+    const token = generateToken(user.id, user.role);
+
+    // Remove sensitive fields
+    delete user.password;
+    delete user.otp_code;
+    delete user.otp_expires_at;
+    delete user.otp_purpose;
 
     res.json({
       success: true,
       message: 'Login successful!',
       token,
-      user: user.toJSON()
+      user
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -106,28 +125,36 @@ exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp, purpose } = req.body;
 
-    const user = await User.findOne({ email }).select('+otp');
-    if (!user) return res.status(404).json({ error: 'User not found.' });
+    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
 
-    if (!user.otp?.code || user.otp.code !== otp) {
+    const user = users[0];
+
+    if (!user.otp_code || user.otp_code !== otp) {
       return res.status(400).json({ error: 'Invalid OTP.' });
     }
 
-    if (user.otp.expiresAt < new Date()) {
+    if (new Date(user.otp_expires_at) < new Date()) {
       return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
     }
 
     if (purpose === 'email_verify') {
-      user.isVerified = true;
-      await createNotification(user._id, {
+      await pool.execute(
+        'UPDATE users SET is_verified = 1, otp_code = NULL, otp_expires_at = NULL, otp_purpose = NULL WHERE id = ?',
+        [user.id]
+      );
+      
+      await createNotification(user.id, {
         type: 'verification_approved',
         title: '✅ Account Verified!',
         body: 'Your Red Drop AI account is now verified.'
       });
+    } else {
+      await pool.execute(
+        'UPDATE users SET otp_code = NULL, otp_expires_at = NULL, otp_purpose = NULL WHERE id = ?',
+        [user.id]
+      );
     }
-
-    user.otp = undefined;
-    await user.save({ validateBeforeSave: false });
 
     res.json({ success: true, message: 'OTP verified successfully!' });
   } catch (error) {
@@ -139,22 +166,24 @@ exports.verifyOTP = async (req, res) => {
 exports.resendOTP = async (req, res) => {
   try {
     const { email, purpose } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ error: 'User not found.' });
-
+    const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email]);
+    
+    if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
+    
+    const user = users[0];
     const otp = generateOTP();
-    user.otp = {
-      code: otp,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      purpose: purpose || 'email_verify'
-    };
-    await user.save({ validateBeforeSave: false });
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await pool.execute(
+      'UPDATE users SET otp_code = ?, otp_expires_at = ?, otp_purpose = ? WHERE id = ?',
+      [otp, otpExpiresAt, purpose || 'email_verify', user.id]
+    );
 
     await sendEmail({
       to: email,
       subject: '🩸 Red Drop AI - Your OTP Code',
       template: 'otp',
-      data: { name: user.name, otp, purpose }
+      data: { name: user.name, otp, purpose: purpose || 'email_verify' }
     });
 
     res.json({ success: true, message: 'OTP sent to your email.' });
@@ -167,16 +196,18 @@ exports.resendOTP = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ error: 'No account with that email.' });
+    const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email]);
+    
+    if (users.length === 0) return res.status(404).json({ error: 'No account with that email.' });
 
+    const user = users[0];
     const otp = generateOTP();
-    user.otp = {
-      code: otp,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      purpose: 'password_reset'
-    };
-    await user.save({ validateBeforeSave: false });
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    await pool.execute(
+      'UPDATE users SET otp_code = ?, otp_expires_at = ?, otp_purpose = ? WHERE id = ?',
+      [otp, otpExpiresAt, 'password_reset', user.id]
+    );
 
     await sendEmail({
       to: email,
@@ -195,19 +226,25 @@ exports.forgotPassword = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    const user = await User.findOne({ email }).select('+otp');
-    if (!user) return res.status(404).json({ error: 'User not found.' });
+    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    
+    if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
 
-    if (!user.otp?.code || user.otp.code !== otp || user.otp.purpose !== 'password_reset') {
+    const user = users[0];
+
+    if (!user.otp_code || user.otp_code !== otp || user.otp_purpose !== 'password_reset') {
       return res.status(400).json({ error: 'Invalid or expired OTP.' });
     }
-    if (user.otp.expiresAt < new Date()) {
+    if (new Date(user.otp_expires_at) < new Date()) {
       return res.status(400).json({ error: 'OTP has expired.' });
     }
 
-    user.password = newPassword;
-    user.otp = undefined;
-    await user.save();
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    await pool.execute(
+      'UPDATE users SET password = ?, otp_code = NULL, otp_expires_at = NULL, otp_purpose = NULL WHERE id = ?',
+      [hashedPassword, user.id]
+    );
 
     res.json({ success: true, message: 'Password reset successfully!' });
   } catch (error) {
@@ -218,8 +255,14 @@ exports.resetPassword = async (req, res) => {
 // GET /api/auth/me
 exports.getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-    res.json({ success: true, user });
+    const [users] = await pool.execute(
+      'SELECT id, name, email, phone, role, blood_group, is_verified, is_active FROM users WHERE id = ?',
+      [req.user.id]
+    );
+    
+    if (users.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    res.json({ success: true, user: users[0] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch profile.' });
   }
