@@ -1,26 +1,40 @@
-# RedDrop AI (MySQL Backend)
+<div align="center">
+  <img src="https://img.shields.io/badge/Status-Active-success?style=for-the-badge" alt="Project Status" />
+  <img src="https://img.shields.io/badge/Platform-Mobile-blue?style=for-the-badge" alt="Platform" />
+  <img src="https://img.shields.io/badge/Database-MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="Database" />
+  
+  <h1>🩸 RedDrop AI</h1>
+  <p><strong>Emergency Blood Donor & Real-Time Tracking System</strong></p>
+</div>
 
-Emergency blood donor and tracking system built with React Native (Expo), Node.js, Express, **MySQL**, Socket.io, Cloudinary, and JWT authentication.
+---
 
-This project has been completely migrated from MongoDB to a normalized MySQL relational database structure to ensure robust data integrity, ACID compliance, and better performance for structured queries.
+RedDrop AI is a powerful mobile-first application that connects blood donors with patients in emergency situations. This repository contains the **Express.js / Node.js Backend**, completely migrated to a normalized **MySQL** relational database to ensure robust data integrity, ACID compliance, and high-speed geospatial donor matching.
 
-## Project Overview
+## ✨ Key Features
 
-RedDrop AI is a mobile-first application for coordinating blood requests, donor discovery, request tracking, and authenticated user workflows in real time.
+- **🛡️ Secure Authentication:** JWT-based auth with bcrypt hashed passwords and email OTP verification.
+- **🗺️ Geospatial Donor Matching:** Uses the Haversine formula directly in MySQL to instantly find available donors near hospitals.
+- **⚡ Real-Time Tracking:** Integrated `Socket.io` pushes instant live updates and notifications to donors and requesters.
+- **🏥 Role-Based Access:** Distinct modules for Donors, Receivers, Hospitals, and Admins.
+- **🖼️ Media Handling:** Profile avatars and medical report uploads directly integrated with Cloudinary.
+- **📧 Transactional Emails:** Nodemailer integration for automated OTPs and alerts.
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Mobile App | React Native + Expo |
-| Backend | Node.js + Express.js |
-| **Database** | **MySQL (mysql2/promise)** |
-| Authentication | JWT + bcryptjs |
-| Realtime | Socket.io |
-| Storage | Multer + Cloudinary |
-| Email | Nodemailer |
+| **Mobile App** | React Native + Expo |
+| **Backend API** | Node.js + Express.js |
+| **Database** | **MySQL (mysql2/promise connection pool)** |
+| **Authentication**| JWT + bcryptjs |
+| **Realtime** | Socket.io |
+| **Storage** | Multer + Cloudinary |
+| **Email** | Nodemailer |
 
-## Architecture Diagram
+## 🏗️ System Architecture
+
+Our backend utilizes a cleanly structured MVC pattern. The complete set of Architectural, ER, and Sequence Diagrams can be found in our [Architecture Documentation](docs/ARCHITECTURE.md).
 
 ```mermaid
 graph TD
@@ -31,108 +45,33 @@ graph TD
     Server -->|Uploads| Cloud[Cloudinary]
 ```
 
-## Entity-Relationship (ER) Diagram
-
-```mermaid
-erDiagram
-    USERS {
-        int id PK
-        string name
-        string email
-        string phone
-        string password
-        enum role
-        enum blood_group
-        boolean is_active
-    }
-    DONORS {
-        int id PK
-        int user_id FK
-        boolean is_available
-        date last_donation_date
-        int total_donations
-    }
-    BLOOD_REQUESTS {
-        int id PK
-        int requester_id FK
-        string request_id
-        string patient_name
-        enum blood_group
-        int units_required
-        string hospital_name
-        enum status
-    }
-    ASSIGNED_DONORS {
-        int id PK
-        int request_id FK
-        int donor_id FK
-        int units
-        enum status
-    }
-    NOTIFICATIONS {
-        int id PK
-        int recipient_id FK
-        string type
-        string title
-        string body
-    }
-
-    USERS ||--o| DONORS : "has one"
-    USERS ||--o{ BLOOD_REQUESTS : "creates"
-    USERS ||--o{ NOTIFICATIONS : "receives"
-    BLOOD_REQUESTS ||--o{ ASSIGNED_DONORS : "has"
-    DONORS ||--o{ ASSIGNED_DONORS : "assigned to"
-```
-
-## API Flow Diagram (Blood Request Lifecycle)
-
-```mermaid
-sequenceDiagram
-    participant Requester
-    participant Server
-    participant MySQL
-    participant Donor
-
-    Requester->>Server: POST /api/requests (Create Request)
-    Server->>MySQL: INSERT INTO blood_requests
-    MySQL-->>Server: Request ID
-    Server->>MySQL: SELECT nearby donors
-    MySQL-->>Server: Donor List
-    Server->>Donor: Notify (Push/Socket)
-    Donor->>Server: POST /api/requests/:id/respond (Accept)
-    Server->>MySQL: INSERT INTO assigned_donors
-    Server->>MySQL: UPDATE blood_requests (donor_found)
-    Server->>Requester: Notify via Socket
-```
-
-## Folder Structure
+## 📂 Project Structure
 
 ```text
 RedDropAI/
 ├── backend/
-│   ├── config/          # DB & Socket configurations
-│   ├── controllers/     # API request handlers
+│   ├── config/          # Database (MySQL pool) & Socket configurations
+│   ├── controllers/     # API request handlers (Auth, Donors, Requests)
 │   ├── database/        # schema.sql and seed.sql
-│   ├── middleware/      # Auth and Upload middleware
+│   ├── middleware/      # Authentication & File Upload middleware
 │   ├── routes/          # Express route definitions
 │   ├── services/        # Email and AI Verification logic
-│   ├── utils/           # Helper functions
-│   └── server.js        # Entry point
-├── frontend/            # React Native Expo app
+│   └── server.js        # Application Entry Point
+├── docs/                # Comprehensive API & Architecture Diagrams
 └── README.md
 ```
 
-## Installation
+## 🚀 Quick Start (Local Development)
 
+### 1. Clone & Install
 ```bash
+git clone https://github.com/yourusername/RedDropAI.git
 cd RedDropAI/backend
 npm install
 ```
 
-## Environment Variables
-
+### 2. Configure Environment Variables
 Create a `.env` file in the `backend/` directory:
-
 ```env
 PORT=5000
 NODE_ENV=development
@@ -149,47 +88,34 @@ JWT_SECRET=super_secret_key
 JWT_EXPIRES_IN=7d
 ```
 
-## Database Setup (MySQL)
-
-1. Ensure MySQL is running on your system.
-2. Log into your MySQL console or a tool like phpMyAdmin/DBeaver.
-3. Run the schema script to create tables:
-   ```bash
-   mysql -u root -p < backend/database/schema.sql
-   ```
-4. Insert dummy data using the seed script (optional):
-   ```bash
-   mysql -u root -p < backend/database/seed.sql
-   ```
-
-## Run the Server
-
+### 3. Database Setup (MySQL)
+Ensure MySQL is running. Run the provided SQL scripts to create tables and insert dummy data:
 ```bash
-cd backend
+mysql -u root -p < database/schema.sql
+mysql -u root -p < database/seed.sql
+```
+
+### 4. Run the Server
+```bash
 npm run dev
 ```
 
-## API Documentation
+## 📖 API Documentation
 
-### Auth Endpoints
-- `POST /api/auth/register`: Register new user/donor. (Body: `name`, `email`, `phone`, `password`, `role`)
-- `POST /api/auth/login`: Login user. (Body: `email`, `password`)
-- `GET /api/auth/me`: Get current authenticated user profile. (Headers: `Authorization: Bearer <token>`)
+Detailed API endpoint documentation can be found in the [API Documentation](docs/API_DOCUMENTATION.md). 
 
-### Donor Endpoints
-- `GET /api/donors/nearby`: Fetch nearby active donors using Haversine formula SQL query. (Query: `latitude`, `longitude`, `bloodGroup`)
-- `GET /api/donors/profile`: Get authenticated donor profile.
-- `PUT /api/donors/availability`: Toggle donor availability. (Body: `isAvailable`)
+### Core Endpoints summary:
+- **Auth:** `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/verify-otp`
+- **Donors:** `GET /api/donors/nearby`, `PUT /api/donors/availability`
+- **Requests:** `POST /api/requests`, `GET /api/requests/:id`, `POST /api/requests/:id/respond`
 
-### Blood Request Endpoints
-- `POST /api/requests`: Create a new blood request. (Body: `patientName`, `bloodGroup`, `unitsRequired`, `hospital`, etc.)
-- `GET /api/requests`: Fetch blood requests (filtered by role and status).
-- `GET /api/requests/:id`: Get detailed request info including assigned donors.
-- `POST /api/requests/:id/respond`: Accept or decline a blood request. (Body: `action`: `accept` or `decline`)
-- `PATCH /api/requests/:id/status`: Update the request lifecycle status. (Body: `status`)
+## 🔮 Future Roadmap
+- Transition remaining logic to the Repository Pattern to fully decouple SQL queries from Express controllers.
+- Implement comprehensive E2E testing using Jest and Supertest.
+- Migrate background email tasks to a Redis queue (BullMQ).
 
-## Future Improvements
-- Refactor all controllers fully into the Repository Pattern to decouple SQL logic from Express routes.
-- Implement comprehensive unit and integration tests using Jest.
-- Integrate a robust queue system (e.g., BullMQ) for background tasks instead of `setTimeout`.
-- Expand real-time tracking for active blood transports.
+---
+
+<div align="center">
+  <i>If you find this project helpful, please consider leaving a ⭐</i>
+</div>

@@ -30,8 +30,7 @@ const userRoutes = require('./routes/user.routes');
 const app = express();
 const server = http.createServer(app);
 
-// Connect Database
-connectDB();
+// Connect Database is now called in startServer()
 
 // Initialize Socket.io
 initSocket(server);
@@ -104,10 +103,22 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`\n🩸 Red Drop AI Backend running on port ${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV}`);
-  console.log(`🔗 Health: http://localhost:${PORT}/health\n`);
-});
+
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    server.listen(PORT, () => {
+      console.log(`🩸 Red Drop AI Backend running on port ${PORT}`);
+      console.log(`📡 Environment: ${process.env.NODE_ENV}`);
+      console.log(`🔗 Health: http://localhost:${PORT}/health`);
+    });
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = { app, server };

@@ -1,20 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth.middleware');
-const User = require('../models/User.model');
+const { pool } = require('../config/database');
 const { upload } = require('../middleware/upload.middleware');
 
 // Update profile
 router.put('/profile', authenticate, async (req, res) => {
   try {
     const { name, phone, location } = req.body;
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { name, phone, location },
-      { new: true, runValidators: true }
+    let address = typeof location === 'string' ? location : (location?.address || null);
+
+    await pool.execute(
+      'UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), address = COALESCE(?, address) WHERE id = ?',
+      [name, phone, address, req.user.id]
     );
-    res.json({ success: true, user });
+
+    const [rows] = await pool.execute('SELECT id, name, email, phone, role, avatar_url, address, city, state, pincode, is_active FROM users WHERE id = ?', [req.user.id]);
+    res.json({ success: true, user: rows[0] });
   } catch (error) {
+    console.error('Update profile error:', error);
     res.status(500).json({ error: 'Update failed.' });
   }
 });
@@ -23,13 +27,18 @@ router.put('/profile', authenticate, async (req, res) => {
 router.post('/avatar', authenticate, upload.single('avatar'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file.' });
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      { avatar: { url: req.file.secure_url, publicId: req.file.public_id } },
-      { new: true }
+
+    const avatarUrl = req.file.secure_url;
+    const publicId = req.file.public_id;
+
+    await pool.execute(
+      'UPDATE users SET avatar_url = ?, avatar_public_id = ? WHERE id = ?',
+      [avatarUrl, publicId, req.user.id]
     );
-    res.json({ success: true, avatar: user.avatar });
+
+    res.json({ success: true, avatar: { url: avatarUrl, publicId } });
   } catch (error) {
+    console.error('Upload avatar error:', error);
     res.status(500).json({ error: 'Upload failed.' });
   }
 });
@@ -37,9 +46,10 @@ router.post('/avatar', authenticate, upload.single('avatar'), async (req, res) =
 // Update FCM token
 router.patch('/fcm-token', authenticate, async (req, res) => {
   try {
-    await User.findByIdAndUpdate(req.user._id, { fcmToken: req.body.token });
+    await pool.execute('UPDATE users SET fcm_token = ? WHERE id = ?', [req.body.token, req.user.id]);
     res.json({ success: true });
   } catch (error) {
+    console.error('Update FCM token error:', error);
     res.status(500).json({ error: 'Failed.' });
   }
 });
@@ -47,17 +57,25 @@ router.patch('/fcm-token', authenticate, async (req, res) => {
 // Get user stats
 router.get('/stats', authenticate, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const [rows] = await pool.execute(
+      'SELECT total_donations, rating_average, created_at FROM users WHERE id = ?',
+      [req.user.id]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found.' });
+    const user = rows[0];
+
     res.json({
       success: true,
       stats: {
-        totalDonations: user.totalDonations,
-        badges: user.badges,
-        rating: user.rating,
-        memberSince: user.createdAt
+        totalDonations: user.total_donations,
+        badges: [], // Mocked badges for now
+        rating: parseFloat(user.rating_average) || 0,
+        memberSince: user.created_at
       }
     });
   } catch (error) {
+    console.error('Get stats error:', error);
     res.status(500).json({ error: 'Failed.' });
   }
 });
