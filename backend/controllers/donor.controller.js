@@ -126,14 +126,14 @@ exports.updateDonorProfile = async (req, res) => {
     let is_profile_complete = (blood_group && city && weight && age && emergency_contact_phone) ? 1 : 0;
 
     await pool.execute(
-      `UPDATE donors SET hemoglobin_level = ?, weight = ?, age = ?, emergency_contact_phone = ?, is_profile_complete = ? WHERE user_id = ?`,
-      [hemoglobin_level, weight, age, emergency_contact_phone, is_profile_complete, req.user.id]
+      `UPDATE donors SET hemoglobin_level = COALESCE(?, hemoglobin_level), weight = COALESCE(?, weight), age = COALESCE(?, age), emergency_contact_phone = COALESCE(?, emergency_contact_phone), is_profile_complete = ? WHERE user_id = ?`,
+      [hemoglobin_level || null, weight || null, age || null, emergency_contact_phone || null, is_profile_complete, req.user.id]
     );
 
     if (city || blood_group) {
       await pool.execute(
         'UPDATE users SET city = COALESCE(?, city), blood_group = COALESCE(?, blood_group) WHERE id = ?',
-        [city, blood_group, req.user.id]
+        [city || null, blood_group || null, req.user.id]
       );
     }
 

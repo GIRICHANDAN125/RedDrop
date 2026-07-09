@@ -32,9 +32,20 @@ exports.createRequest = async (req, res) => {
     const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
 
     const [result] = await pool.execute(
-      `INSERT INTO blood_requests (request_id, requester_id, patient_name, blood_group, units_required, emergency_level, hospital_name, hospital_city, hospital_lat, hospital_lng, status, expires_at, notes, is_anonymous)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'searching', ?, ?, ?)`,
-      [requestId, req.user.id, patientName, bloodGroup, unitsRequired, emergencyLevel, hospital.name, hospital.city, hospital.location?.coordinates[1] || null, hospital.location?.coordinates[0] || null, expiresAt, notes, isAnonymous ? 1 : 0]
+      `INSERT INTO blood_requests (request_id, requester_id, patient_name, blood_group, units_required, emergency_level, hospital_name, hospital_address, hospital_city, hospital_state, hospital_pincode, hospital_contact_number, hospital_lat, hospital_lng, status, expires_at, notes, is_anonymous)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'searching', ?, ?, ?)`,
+      [
+        requestId, req.user.id, patientName, bloodGroup, unitsRequired, emergencyLevel,
+        hospital.name || null,
+        hospital.address || null,
+        hospital.city || null,
+        hospital.state || null,
+        hospital.pincode || null,
+        hospital.contactNumber || hospital.contact_number || null,
+        hospital.lat || hospital.location?.lat || null,
+        hospital.lng || hospital.location?.lng || null,
+        expiresAt, notes || null, isAnonymous ? 1 : 0
+      ]
     );
 
     const newRequestId = result.insertId;
@@ -104,10 +115,9 @@ exports.getRequests = async (req, res) => {
     
     const limitInt = parseInt(limit);
     const offsetInt = (parseInt(page) - 1) * limitInt;
-    params.push(limitInt.toString(), offsetInt.toString());
+    params.push(limitInt, offsetInt);
 
-    // NOTE: pool.execute doesn't easily support string params for limit/offset without strict type conversions, pool.query is safer or parsing them to int with named placeholders.
-    const [requests] = await pool.query(sql, params.map(p => Number.isNaN(Number(p)) ? p : Number(p)));
+    const [requests] = await pool.query(sql, params);
 
     res.json({
       success: true,

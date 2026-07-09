@@ -21,7 +21,7 @@ exports.register = async (req, res) => {
 
     const [existingUsers] = await pool.execute(
       'SELECT id, email, phone FROM users WHERE email = ? OR phone = ?',
-      [email, phone]
+      [email || null, phone || null]
     );
 
     if (existingUsers.length > 0) {
@@ -38,7 +38,7 @@ exports.register = async (req, res) => {
     const [result] = await pool.execute(
       `INSERT INTO users (name, email, phone, password, role, blood_group, otp_code, otp_expires_at, otp_purpose) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, email, phone, hashedPassword, role, role === 'donor' ? bloodGroup : null, otp, otpExpiresAt, 'email_verify']
+      [name || null, email || null, phone || null, hashedPassword, role || 'receiver', (role === 'donor' && bloodGroup) ? bloodGroup : null, otp, otpExpiresAt, 'email_verify']
     );
 
     const userId = result.insertId;
@@ -46,8 +46,8 @@ exports.register = async (req, res) => {
     // Create donor profile if donor
     if (role === 'donor') {
       await pool.execute(
-        'INSERT INTO donors (user_id, blood_group) VALUES (?, ?)',
-        [userId, bloodGroup || null]
+        'INSERT INTO donors (user_id) VALUES (?)',
+        [userId]
       );
     }
 
@@ -81,7 +81,7 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email || null]);
     
     if (users.length === 0) {
       return res.status(401).json({ error: 'Invalid email or password.' });
@@ -125,7 +125,7 @@ exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp, purpose } = req.body;
 
-    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email || null]);
     if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
 
     const user = users[0];
@@ -166,7 +166,7 @@ exports.verifyOTP = async (req, res) => {
 exports.resendOTP = async (req, res) => {
   try {
     const { email, purpose } = req.body;
-    const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email]);
+    const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email || null]);
     
     if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
     
@@ -196,7 +196,7 @@ exports.resendOTP = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email]);
+    const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email || null]);
     
     if (users.length === 0) return res.status(404).json({ error: 'No account with that email.' });
 
@@ -226,7 +226,7 @@ exports.forgotPassword = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email || null]);
     
     if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
 

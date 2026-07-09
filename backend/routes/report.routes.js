@@ -1,4 +1,3 @@
 const express = require('express');
-const r1 = express.Router();
-const r2 = express.Router();
-module.exports = r1; // report.routes.js placeholder
+const router = express.Router();
+module.exports = router; // report.routes.js placeholder

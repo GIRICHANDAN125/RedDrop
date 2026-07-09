@@ -61,9 +61,9 @@ exports.getUserNotifications = async (userId, { page = 1, limit = 20, unreadOnly
   sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
   const limitInt = parseInt(limit);
   const offsetInt = (parseInt(page) - 1) * limitInt;
-  params.push(limitInt.toString(), offsetInt.toString());
+  params.push(limitInt, offsetInt);
 
-  const [notifications] = await pool.query(sql, params.map(p => Number.isNaN(Number(p)) ? p : Number(p)));
+  const [notifications] = await pool.query(sql, params);
 
   notifications.forEach(n => {
     if (n.data) n.data = JSON.parse(n.data);

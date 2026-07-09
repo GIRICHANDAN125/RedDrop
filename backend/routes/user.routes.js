@@ -46,7 +46,7 @@ router.post('/avatar', authenticate, upload.single('avatar'), async (req, res) =
 // Update FCM token
 router.patch('/fcm-token', authenticate, async (req, res) => {
   try {
-    await pool.execute('UPDATE users SET fcm_token = ? WHERE id = ?', [req.body.token, req.user.id]);
+    await pool.execute('UPDATE users SET fcm_token = ? WHERE id = ?', [req.body.token || null, req.user.id]);
     res.json({ success: true });
   } catch (error) {
     console.error('Update FCM token error:', error);

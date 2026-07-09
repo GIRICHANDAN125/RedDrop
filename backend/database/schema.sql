@@ -1,6 +1,6 @@
 -- Create Database
-CREATE DATABASE IF NOT EXISTS reddrop_ai;
-USE reddrop_ai;
+CREATE DATABASE IF NOT EXISTS reddropai;
+USE reddropai;
 
 -- Users Table
 CREATE TABLE IF NOT EXISTS users (
@@ -139,5 +139,5 @@ CREATE INDEX idx_users_phone ON users(phone);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_blood_requests_status ON blood_requests(status);
 CREATE INDEX idx_blood_requests_blood_group ON blood_requests(blood_group);
-CREATE INDEX idx_donors_blood_group ON donors(is_available);
+CREATE INDEX idx_donors_available ON donors(is_available);
 CREATE INDEX idx_notifications_recipient ON notifications(recipient_id, is_read);
