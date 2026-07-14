@@ -1,5 +1,15 @@
 const { pool } = require('../config/database');
 const { priorityQueue } = require('../utils/dsa.utils');
+const { getSignedFileUrl } = require('../config/aws');
+
+const hydrateDonorAvatars = async (donors) => {
+  return Promise.all(donors.map(async (donor) => {
+    if (donor?.avatar_public_id) {
+      donor.avatar_url = await getSignedFileUrl(donor.avatar_public_id);
+    }
+    return donor;
+  }));
+};
 
 // GET /api/donors/nearby
 exports.getNearbyDonors = async (req, res) => {
@@ -19,7 +29,7 @@ exports.getNearbyDonors = async (req, res) => {
     const compatibleGroups = getCompatibleBloodGroups(bloodGroup);
 
     let sql = `
-      SELECT d.*, u.name, u.phone, u.avatar_url, u.rating_average, u.total_donations, u.last_seen, u.location_lat, u.location_lng,
+      SELECT d.*, u.name, u.phone, u.avatar_url, u.avatar_public_id, u.rating_average, u.total_donations, u.last_seen, u.location_lat, u.location_lng,
              (6371 * acos(cos(radians(?)) * cos(radians(u.location_lat)) * cos(radians(u.location_lng) - radians(?)) + sin(radians(?)) * sin(radians(u.location_lat)))) AS distance
       FROM donors d
       JOIN users u ON d.user_id = u.id
@@ -38,6 +48,7 @@ exports.getNearbyDonors = async (req, res) => {
     params.push(maxDistanceKm, parseInt(limit));
 
     const [donors] = await pool.execute(sql, params);
+    await hydrateDonorAvatars(donors);
 
     // DSA: Priority Queue sort by urgency score (distance + response rate + availability)
     const scoredDonors = donors.map(donor => ({
@@ -65,7 +76,7 @@ exports.searchDonors = async (req, res) => {
     const { query, bloodGroup, city, state, available } = req.query;
 
     let sql = `
-      SELECT d.*, u.name, u.phone, u.avatar_url, u.rating_average, u.total_donations
+      SELECT d.*, u.name, u.phone, u.avatar_url, u.avatar_public_id, u.rating_average, u.total_donations
       FROM donors d
       JOIN users u ON d.user_id = u.id
       WHERE 1=1
@@ -95,6 +106,7 @@ exports.searchDonors = async (req, res) => {
     sql += ` LIMIT 50`;
 
     const [donors] = await pool.execute(sql, params);
+    await hydrateDonorAvatars(donors);
 
     res.json({ success: true, count: donors.length, donors });
   } catch (error) {
@@ -175,11 +187,12 @@ exports.toggleAvailability = async (req, res) => {
 exports.getDonorById = async (req, res) => {
   try {
     const [donors] = await pool.execute(
-      'SELECT d.*, u.name, u.avatar_url, u.rating_average, u.total_donations FROM donors d JOIN users u ON d.user_id = u.id WHERE d.id = ?',
+      'SELECT d.*, u.name, u.avatar_url, u.avatar_public_id, u.rating_average, u.total_donations FROM donors d JOIN users u ON d.user_id = u.id WHERE d.id = ?',
       [req.params.id]
     );
 
     if (donors.length === 0) return res.status(404).json({ error: 'Donor not found.' });
+    await hydrateDonorAvatars(donors);
     res.json({ success: true, donor: donors[0] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch donor.' });

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth.middleware');
 const { pool } = require('../config/database');
+const { getSignedFileUrl } = require('../config/aws');
 
 router.get('/:requestId', authenticate, async (req, res) => {
   try {
@@ -33,9 +34,9 @@ router.get('/:requestId', authenticate, async (req, res) => {
 
     // 3. Get assigned donors
     const [donorRows] = await pool.execute(
-      `SELECT ad.id, ad.status, ad.distance, ad.eta_minutes as eta,
+            `SELECT ad.id, ad.status, ad.distance, ad.eta_minutes as eta,
               d.id as donor_id, 
-              u.id as user_id, u.name, u.phone, u.avatar_url as avatar, u.location_lat, u.location_lng
+              u.id as user_id, u.name, u.phone, u.avatar_url as avatar, u.avatar_public_id as avatar_key, u.location_lat, u.location_lng
        FROM assigned_donors ad
        JOIN donors d ON ad.donor_id = d.id
        JOIN users u ON d.user_id = u.id
@@ -43,7 +44,7 @@ router.get('/:requestId', authenticate, async (req, res) => {
        [req.params.requestId]
     );
 
-    tracking.assignedDonors = donorRows.map(row => ({
+    tracking.assignedDonors = await Promise.all(donorRows.map(async row => ({
       _id: row.id,
       id: row.id,
       status: row.status,
@@ -57,11 +58,14 @@ router.get('/:requestId', authenticate, async (req, res) => {
           id: row.user_id,
           name: row.name,
           phone: row.phone,
-          avatar: { url: row.avatar } // keeping avatar structure mostly safe
+          avatar: {
+            url: row.avatar_key ? await getSignedFileUrl(row.avatar_key) : row.avatar,
+            key: row.avatar_key || null
+          }
         },
         location: { lat: row.location_lat, lng: row.location_lng }
       }
-    }));
+    })));
 
     // Clean up temporary flat fields
     delete tracking.hospitalName;

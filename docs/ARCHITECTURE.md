@@ -14,7 +14,7 @@ flowchart LR
   Mobile <-->|WebSockets| Realtime[Socket.io Server]
   API <-->|mysql2/promise| DB[(MySQL Database)]
   API --> Email[SMTP Email Service]
-  API --> Cloudinary[Cloudinary Media Storage]
+    API --> S3[Amazon S3 Media Storage]
   Realtime --> API
 ```
 

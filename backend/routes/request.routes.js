@@ -5,7 +5,7 @@ const {
   respondToRequest, updateRequestStatus, uploadMedicalReport
 } = require('../controllers/request.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
-const { upload } = require('../middleware/upload.middleware');
+const { upload } = require('../middleware/upload');
 
 router.post('/', authenticate, createRequest);
 router.get('/', authenticate, getRequests);

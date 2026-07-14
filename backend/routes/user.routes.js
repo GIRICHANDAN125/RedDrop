@@ -2,7 +2,18 @@ const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth.middleware');
 const { pool } = require('../config/database');
-const { upload } = require('../middleware/upload.middleware');
+const { upload } = require('../middleware/upload');
+const { getSignedFileUrl, deleteS3Object } = require('../config/aws');
+
+const hydrateAvatarUrl = async (user) => {
+  if (!user) return user;
+
+  if (user.avatar_public_id) {
+    user.avatar_url = await getSignedFileUrl(user.avatar_public_id);
+  }
+
+  return user;
+};
 
 // Update profile
 router.put('/profile', authenticate, async (req, res) => {
@@ -15,8 +26,8 @@ router.put('/profile', authenticate, async (req, res) => {
       [name, phone, address, req.user.id]
     );
 
-    const [rows] = await pool.execute('SELECT id, name, email, phone, role, avatar_url, address, city, state, pincode, is_active FROM users WHERE id = ?', [req.user.id]);
-    res.json({ success: true, user: rows[0] });
+    const [rows] = await pool.execute('SELECT id, name, email, phone, role, avatar_url, avatar_public_id, address, city, state, pincode, is_active FROM users WHERE id = ?', [req.user.id]);
+    res.json({ success: true, user: await hydrateAvatarUrl(rows[0]) });
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ error: 'Update failed.' });
@@ -28,15 +39,27 @@ router.post('/avatar', authenticate, upload.single('avatar'), async (req, res) =
   try {
     if (!req.file) return res.status(400).json({ error: 'No file.' });
 
-    const avatarUrl = req.file.secure_url;
-    const publicId = req.file.public_id;
+    const [currentUsers] = await pool.execute(
+      'SELECT avatar_public_id FROM users WHERE id = ?',
+      [req.user.id]
+    );
+
+    const oldAvatarKey = currentUsers[0]?.avatar_public_id || null;
+    const avatarKey = req.file.key;
+    const avatarUrl = await getSignedFileUrl(avatarKey);
 
     await pool.execute(
       'UPDATE users SET avatar_url = ?, avatar_public_id = ? WHERE id = ?',
-      [avatarUrl, publicId, req.user.id]
+      [avatarUrl, avatarKey, req.user.id]
     );
 
-    res.json({ success: true, avatar: { url: avatarUrl, publicId } });
+    if (oldAvatarKey && oldAvatarKey !== avatarKey) {
+      await deleteS3Object(oldAvatarKey).catch(error => {
+        console.error('Failed to delete previous avatar from S3:', error.message);
+      });
+    }
+
+    res.json({ success: true, avatar: { url: avatarUrl, key: avatarKey } });
   } catch (error) {
     console.error('Upload avatar error:', error);
     res.status(500).json({ error: 'Upload failed.' });

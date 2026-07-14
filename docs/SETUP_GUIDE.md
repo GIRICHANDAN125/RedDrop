@@ -36,9 +36,10 @@ JWT_SECRET=
 JWT_EXPIRES_IN=
 CLIENT_URL=
 NODE_ENV=
-CLOUDINARY_CLOUD_NAME=
-CLOUDINARY_API_KEY=
-CLOUDINARY_API_SECRET=
+AWS_REGION=
+AWS_BUCKET_NAME=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
 SMTP_HOST=
 SMTP_PORT=
 SMTP_USER=
@@ -117,9 +118,10 @@ MONGODB_URI=mongodb://localhost:27017/reddropai
 JWT_SECRET=your_super_secret_at_least_64_chars_random_string
 JWT_EXPIRES_IN=7d
 
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
+AWS_REGION=ap-south-1
+AWS_BUCKET_NAME=your-private-bucket-name
+AWS_ACCESS_KEY_ID=your_access_key_id
+AWS_SECRET_ACCESS_KEY=your_secret_access_key
 
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -162,11 +164,12 @@ If MongoDB is not installed yet:
 
 ---
 
-## 🌤️ Step 4: Set Up Cloudinary (File Uploads)
+## 🌤️ Step 4: Set Up Amazon S3 (File Uploads)
 
-1. Create free account at [cloudinary.com](https://cloudinary.com)
-2. Go to Dashboard → copy Cloud Name, API Key, API Secret
-3. Add to `backend/.env`
+1. Create an AWS account and open the S3 console.
+2. Create a private bucket for RedDrop AI uploads.
+3. Create an IAM user with least-privilege S3 access.
+4. Add `AWS_REGION`, `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` to `backend/.env`.
 
 ---
 

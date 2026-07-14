@@ -17,7 +17,7 @@ RedDrop AI is a powerful mobile-first application that connects blood donors wit
 - **🗺️ Geospatial Donor Matching:** Uses the Haversine formula directly in MySQL to instantly find available donors near hospitals.
 - **⚡ Real-Time Tracking:** Integrated `Socket.io` pushes instant live updates and notifications to donors and requesters.
 - **🏥 Role-Based Access:** Distinct modules for Donors, Receivers, Hospitals, and Admins.
-- **🖼️ Media Handling:** Profile avatars and medical report uploads directly integrated with Cloudinary.
+- **🖼️ Media Handling:** Profile avatars and medical report uploads directly integrated with Amazon S3.
 - **📧 Transactional Emails:** Nodemailer integration for automated OTPs and alerts.
 
 ## 🛠️ Tech Stack
@@ -29,7 +29,7 @@ RedDrop AI is a powerful mobile-first application that connects blood donors wit
 | **Database** | **MySQL (mysql2/promise connection pool)** |
 | **Authentication**| JWT + bcryptjs |
 | **Realtime** | Socket.io |
-| **Storage** | Multer + Cloudinary |
+| **Storage** | Multer + Amazon S3 |
 | **Email** | Nodemailer |
 
 ## 🏗️ System Architecture
@@ -42,7 +42,7 @@ graph TD
     Client -->|Socket.io / WSS| Server
     Server -->|mysql2 pool| DB[(MySQL Database)]
     Server -->|SMTP| Email[Nodemailer]
-    Server -->|Uploads| Cloud[Cloudinary]
+    Server -->|Uploads| S3[Amazon S3]
 ```
 
 ## 📂 Project Structure

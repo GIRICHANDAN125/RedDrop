@@ -46,8 +46,8 @@ exports.verifyMedicalReport = async (fileUrl) => {
 };
 
 async function checkMetadata(url) {
-  // Check if file URL is from a trusted source (Cloudinary, etc.)
-  const trustedDomains = ['res.cloudinary.com', 'storage.googleapis.com', 'amazonaws.com'];
+  // Check if file URL is from a trusted object storage domain.
+  const trustedDomains = ['storage.googleapis.com', 'amazonaws.com'];
   const isTrusted = trustedDomains.some(d => url.includes(d));
 
   return {

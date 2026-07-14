@@ -5,7 +5,7 @@ This repository handles authentication, file uploads, email delivery, and real-t
 ## Secret Handling
 
 - Never commit `.env` files.
-- Keep `JWT_SECRET`, MongoDB credentials, Cloudinary credentials, SMTP credentials, and API keys in local environment files or deployment secrets.
+- Keep `JWT_SECRET`, database credentials, AWS credentials, SMTP credentials, and API keys in local environment files or deployment secrets.
 - Use `.env.example` as the only committed reference for environment variables.
 
 ## Reporting Issues

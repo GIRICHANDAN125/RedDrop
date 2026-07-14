@@ -2,7 +2,17 @@ const { pool } = require('../config/database');
 const { createNotification, notifyNearbyDonors } = require('../services/notification.service');
 const { verifyMedicalReport } = require('../services/aiVerification.service');
 const { emitToRequest, emitToUser } = require('../config/socket');
+const { getSignedFileUrl } = require('../config/aws');
 const crypto = require('crypto');
+
+const hydrateAvatarUrls = async (rows, urlField, keyField) => {
+  return Promise.all(rows.map(async (row) => {
+    if (row?.[keyField]) {
+      row[urlField] = await getSignedFileUrl(row[keyField]);
+    }
+    return row;
+  }));
+};
 
 const generateRequestId = () => {
   return 'RD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -75,7 +85,7 @@ exports.getRequests = async (req, res) => {
   try {
     const { status, bloodGroup, emergencyLevel, page = 1, limit = 20 } = req.query;
     let sql = `
-      SELECT r.*, u.name as requester_name, u.avatar_url as requester_avatar
+      SELECT r.*, u.name as requester_name, u.avatar_url as requester_avatar, u.avatar_public_id as requester_avatar_key
       FROM blood_requests r
       JOIN users u ON r.requester_id = u.id
       WHERE 1=1
@@ -105,7 +115,7 @@ exports.getRequests = async (req, res) => {
       params.push(emergencyLevel);
     }
 
-    const countSql = sql.replace('SELECT r.*, u.name as requester_name, u.avatar_url as requester_avatar', 'SELECT COUNT(*) as total');
+    const countSql = sql.replace('SELECT r.*, u.name as requester_name, u.avatar_url as requester_avatar, u.avatar_public_id as requester_avatar_key', 'SELECT COUNT(*) as total');
     const [countRows] = await pool.execute(countSql, params);
     const total = countRows[0].total;
 
@@ -118,6 +128,7 @@ exports.getRequests = async (req, res) => {
     params.push(limitInt, offsetInt);
 
     const [requests] = await pool.query(sql, params);
+    await hydrateAvatarUrls(requests, 'requester_avatar', 'requester_avatar_key');
 
     res.json({
       success: true,
@@ -134,7 +145,7 @@ exports.getRequests = async (req, res) => {
 exports.getRequestById = async (req, res) => {
   try {
     const [requests] = await pool.execute(
-      `SELECT r.*, u.name as requester_name, u.phone as requester_phone, u.avatar_url as requester_avatar 
+      `SELECT r.*, u.name as requester_name, u.phone as requester_phone, u.avatar_url as requester_avatar, u.avatar_public_id as requester_avatar_key 
        FROM blood_requests r JOIN users u ON r.requester_id = u.id WHERE r.id = ?`,
       [req.params.id]
     );
@@ -151,6 +162,9 @@ exports.getRequestById = async (req, res) => {
     );
 
     const request = requests[0];
+    if (request.requester_avatar_key) {
+      request.requester_avatar = await getSignedFileUrl(request.requester_avatar_key);
+    }
     request.assignedDonors = assignedDonors;
 
     res.json({ success: true, request });
@@ -277,8 +291,8 @@ exports.uploadMedicalReport = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
 
-    const { secure_url, public_id } = req.file;
-    const aiVerification = await verifyMedicalReport(secure_url);
+    const reportUrl = await getSignedFileUrl(req.file.key);
+    const aiVerification = await verifyMedicalReport(reportUrl);
     
     // In SQL, we can store this in a JSON column or new table. Since we don't have it in schema, we will skip or alter it.
     // Assuming we added a 'medical_report_url' and 'medical_report_verification' JSON column to blood_requests.
@@ -286,7 +300,11 @@ exports.uploadMedicalReport = async (req, res) => {
     res.json({
       success: true,
       message: 'Medical report uploaded and analyzed.',
-      verification: aiVerification
+      verification: aiVerification,
+      report: {
+        url: reportUrl,
+        key: req.file.key
+      }
     });
   } catch (error) {
     res.status(500).json({ error: 'Upload failed.' });
