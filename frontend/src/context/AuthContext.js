@@ -78,10 +78,22 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (userData) => {
     try {
-      const { data } = await api.post('/auth/register', userData);
-      await saveAuth(data.token, data.user);
-      dispatch({ type: 'LOGIN_SUCCESS', payload: data });
-      return { success: true, requiresVerification: data.requiresVerification };
+      const response = await api.post('/auth/register', userData);
+      const data = response.data || {};
+
+      try {
+        if (data.token && data.user) {
+          await saveAuth(data.token, data.user);
+        }
+      } catch (storageError) {
+        console.warn('Registration succeeded, but auth persistence failed:', storageError);
+      }
+
+      if (data.token && data.user) {
+        dispatch({ type: 'LOGIN_SUCCESS', payload: data });
+      }
+
+      return { success: true, requiresVerification: !!data.requiresVerification };
     } catch (error) {
       const message = error.response?.data?.error || 'Registration failed.';
       return { success: false, error: message };

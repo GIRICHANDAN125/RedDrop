@@ -53,9 +53,11 @@ const RegisterScreen = ({ navigation }) => {
 
   const handleRegister = async () => {
     setLoading(true);
+    setErrors(prev => ({ ...prev, general: null }));
     const result = await register(form);
     setLoading(false);
     if (result.success) {
+      setErrors({});
       if (result.requiresVerification) {
         navigation.navigate('OTPVerification', { email: form.email, purpose: 'email_verify' });
       }
