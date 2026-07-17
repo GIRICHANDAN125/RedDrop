@@ -1,7 +1,9 @@
 import { io } from 'socket.io-client';
 import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 
-const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const LOCAL_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const SOCKET_URL = process.env.EXPO_PUBLIC_SOCKET_URL || `http://${LOCAL_HOST}:5000`;
 
 let socket = null;
 

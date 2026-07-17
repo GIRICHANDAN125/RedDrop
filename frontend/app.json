@@ -33,8 +33,6 @@
         "ACCESS_COARSE_LOCATION",
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECEIVE_BOOT_COMPLETED",
         "VIBRATE"
       ],
       "config": {
@@ -54,8 +52,6 @@
       ]
     ],
     "scheme": "reddropai",
-    "extra": {
-      "eas": { "projectId": "your-eas-project-id" }
-    }
+    "extra": {}
   }
 }

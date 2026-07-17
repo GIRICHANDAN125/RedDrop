@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './src/context/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,6 +17,10 @@ const queryClient = new QueryClient({
 export default function App() {
   const onLayoutRootView = useCallback(async () => {
     await SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   return (

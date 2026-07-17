@@ -2,6 +2,8 @@ import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { api } from '../api/client';
 
+const VERIFY_TIMEOUT_MS = 5000;
+
 const AuthContext = createContext(null);
 
 const initialState = {
@@ -48,13 +50,16 @@ export const AuthProvider = ({ children }) => {
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         dispatch({ type: 'LOGIN_SUCCESS', payload: { user, token } });
 
-        // Verify token is still valid
-        try {
-          const response = await api.get('/auth/me');
-          dispatch({ type: 'UPDATE_USER', payload: response.data.user });
-        } catch {
-          await clearAuth();
-        }
+        // Verify token in the background so startup is never blocked by the backend.
+        void api.get('/auth/me', { timeout: VERIFY_TIMEOUT_MS })
+          .then((response) => {
+            if (response?.data?.user) {
+              dispatch({ type: 'UPDATE_USER', payload: response.data.user });
+            }
+          })
+          .catch(async () => {
+            await clearAuth();
+          });
       } else {
         dispatch({ type: 'SET_LOADING', payload: false });
       }
