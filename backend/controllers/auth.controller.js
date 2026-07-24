@@ -82,7 +82,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email || null]);
-    
+
     if (users.length === 0) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
@@ -143,7 +143,7 @@ exports.verifyOTP = async (req, res) => {
         'UPDATE users SET is_verified = 1, otp_code = NULL, otp_expires_at = NULL, otp_purpose = NULL WHERE id = ?',
         [user.id]
       );
-      
+
       await createNotification(user.id, {
         type: 'verification_approved',
         title: '✅ Account Verified!',
@@ -167,9 +167,9 @@ exports.resendOTP = async (req, res) => {
   try {
     const { email, purpose } = req.body;
     const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email || null]);
-    
+
     if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
-    
+
     const user = users[0];
     const otp = generateOTP();
     const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -197,7 +197,7 @@ exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email || null]);
-    
+
     if (users.length === 0) return res.status(404).json({ error: 'No account with that email.' });
 
     const user = users[0];
@@ -227,7 +227,7 @@ exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     const [users] = await pool.execute('SELECT * FROM users WHERE email = ?', [email || null]);
-    
+
     if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
 
     const user = users[0];
@@ -259,9 +259,9 @@ exports.getMe = async (req, res) => {
       'SELECT id, name, email, phone, role, blood_group, is_verified, is_active FROM users WHERE id = ?',
       [req.user.id]
     );
-    
+
     if (users.length === 0) return res.status(404).json({ error: 'User not found' });
-    
+
     res.json({ success: true, user: users[0] });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch profile.' });
