@@ -1,9 +1,13 @@
-const { pool } = require('../config/database');
+const requestRepository = require('../repositories/request.repository');
+const responseRepository = require('../repositories/response.repository');
+const timelineRepository = require('../repositories/timeline.repository');
+const notificationRepository = require('../repositories/notification.repository');
+const donorRepository = require('../repositories/donor.repository');
+const userRepository = require('../repositories/user.repository');
 const { createNotification, notifyNearbyDonors } = require('../services/notification.service');
 const { verifyMedicalReport } = require('../services/aiVerification.service');
 const { emitToRequest, emitToUser } = require('../config/socket');
 const { getSignedFileUrl } = require('../config/aws');
-const crypto = require('crypto');
 
 const hydrateAvatarUrls = async (rows, urlField, keyField) => {
   return Promise.all(rows.map(async (row) => {
@@ -26,10 +30,10 @@ exports.createRequest = async (req, res) => {
       emergencyLevel, hospital, notes, isAnonymous
     } = req.body;
 
-    const [users] = await pool.execute('SELECT created_at FROM users WHERE id = ?', [req.user.id]);
-    
+    const userAuthRow = await userRepository.findById(req.user.id);
+
     // AI fake detection pre-check
-    const aiAnalysis = await analyzeRequest(req.body, req.user.id, users[0]?.created_at);
+    const aiAnalysis = await analyzeRequest(req.body, req.user.id, userAuthRow?.created_at);
 
     if (aiAnalysis.fakeDetectionScore > 80) {
       return res.status(422).json({
@@ -41,38 +45,44 @@ exports.createRequest = async (req, res) => {
     const requestId = generateRequestId();
     const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
 
-    const [result] = await pool.execute(
-      `INSERT INTO blood_requests (request_id, requester_id, patient_name, blood_group, units_required, emergency_level, hospital_name, hospital_address, hospital_city, hospital_state, hospital_pincode, hospital_contact_number, hospital_lat, hospital_lng, status, expires_at, notes, is_anonymous)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'searching', ?, ?, ?)`,
-      [
-        requestId, req.user.id, patientName, bloodGroup, unitsRequired, emergencyLevel,
-        hospital.name || null,
-        hospital.address || null,
-        hospital.city || null,
-        hospital.state || null,
-        hospital.pincode || null,
-        hospital.contactNumber || hospital.contact_number || null,
-        hospital.lat || hospital.location?.lat || null,
-        hospital.lng || hospital.location?.lng || null,
-        expiresAt, notes || null, isAnonymous ? 1 : 0
-      ]
-    );
+    const newRequestDbId = await requestRepository.create({
+      request_id: requestId,
+      requester_id: req.user.id,
+      patient_name: patientName,
+      blood_group: bloodGroup,
+      units_required: unitsRequired,
+      emergency_level: emergencyLevel,
+      hospital_name: hospital?.name || null,
+      hospital_address: hospital?.address || null,
+      hospital_city: hospital?.city || null,
+      hospital_state: hospital?.state || null,
+      hospital_pincode: hospital?.pincode || null,
+      hospital_contact_number: hospital?.contactNumber || hospital?.contact_number || null,
+      hospital_lat: hospital?.lat || hospital?.location?.lat || null,
+      hospital_lng: hospital?.lng || hospital?.location?.lng || null,
+      status: 'searching',
+      expires_at: expiresAt,
+      notes: notes || null,
+      is_anonymous: isAnonymous ? 1 : 0
+    });
 
-    const newRequestId = result.insertId;
+    // Create initial timeline entry
+    await timelineRepository.addEntry({
+      requestId: newRequestDbId,
+      status: 'pending',
+      note: 'Request created',
+      updatedBy: req.user.id
+    });
 
-    await pool.execute(
-      `INSERT INTO request_timelines (request_id, status, note, updated_by) VALUES (?, 'pending', 'Request created', ?)`,
-      [newRequestId, req.user.id]
-    );
+    // Async: find and notify nearby donors
+    await processRequestAsync(newRequestDbId);
 
-    await processRequestAsync(newRequestId);
-
-    const [requestRows] = await pool.execute('SELECT * FROM blood_requests WHERE id = ?', [newRequestId]);
+    const request = await requestRepository.findById(newRequestDbId);
 
     res.status(201).json({
       success: true,
       message: 'Blood request created! Searching for donors...',
-      request: requestRows[0]
+      request
     });
   } catch (error) {
     console.error('Create request error:', error);
@@ -84,55 +94,33 @@ exports.createRequest = async (req, res) => {
 exports.getRequests = async (req, res) => {
   try {
     const { status, bloodGroup, emergencyLevel, page = 1, limit = 20 } = req.query;
-    let sql = `
-      SELECT r.*, u.name as requester_name, u.avatar_url as requester_avatar, u.avatar_public_id as requester_avatar_key
-      FROM blood_requests r
-      JOIN users u ON r.requester_id = u.id
-      WHERE 1=1
-    `;
-    let params = [];
 
-    // Role-based filtering
-    if (req.user.role === 'receiver') {
-      sql += ` AND r.requester_id = ?`;
-      params.push(req.user.id);
-    } else if (req.user.role === 'donor') {
-      const [users] = await pool.execute('SELECT blood_group FROM users WHERE id = ?', [req.user.id]);
-      sql += ` AND r.blood_group = ? AND r.status IN ('searching', 'pending')`;
-      params.push(users[0]?.blood_group);
+    const userRoles = req.user?.roles || [];
+    let requesterId = null;
+    let donorBloodGroup = null;
+
+    if (userRoles.includes('patient') && !userRoles.includes('admin')) {
+      requesterId = req.user.id;
+    } else if (userRoles.includes('donor') && !userRoles.includes('admin') && !userRoles.includes('patient')) {
+      const donorProfile = await donorRepository.findFullProfileByUserId(req.user.id);
+      donorBloodGroup = donorProfile?.blood_group || null;
     }
 
-    if (status) {
-      sql += ` AND r.status = ?`;
-      params.push(status);
-    }
-    if (bloodGroup) {
-      sql += ` AND r.blood_group = ?`;
-      params.push(bloodGroup);
-    }
-    if (emergencyLevel) {
-      sql += ` AND r.emergency_level = ?`;
-      params.push(emergencyLevel);
-    }
+    const { rows, total } = await requestRepository.findFiltered({
+      requesterId,
+      donorBloodGroup,
+      status,
+      bloodGroup,
+      emergencyLevel,
+      page: parseInt(page),
+      limit: parseInt(limit)
+    });
 
-    const countSql = sql.replace('SELECT r.*, u.name as requester_name, u.avatar_url as requester_avatar, u.avatar_public_id as requester_avatar_key', 'SELECT COUNT(*) as total');
-    const [countRows] = await pool.execute(countSql, params);
-    const total = countRows[0].total;
-
-    // Custom order by emergency level
-    sql += ` ORDER BY FIELD(r.emergency_level, 'critical', 'high', 'medium', 'low'), r.created_at DESC`;
-    sql += ` LIMIT ? OFFSET ?`;
-    
-    const limitInt = parseInt(limit);
-    const offsetInt = (parseInt(page) - 1) * limitInt;
-    params.push(limitInt, offsetInt);
-
-    const [requests] = await pool.query(sql, params);
-    await hydrateAvatarUrls(requests, 'requester_avatar', 'requester_avatar_key');
+    await hydrateAvatarUrls(rows, 'requester_avatar', 'requester_avatar_key');
 
     res.json({
       success: true,
-      requests,
+      requests: rows,
       pagination: { total, page: parseInt(page), pages: Math.ceil(total / limit) }
     });
   } catch (error) {
@@ -144,31 +132,19 @@ exports.getRequests = async (req, res) => {
 // GET /api/requests/:id
 exports.getRequestById = async (req, res) => {
   try {
-    const [requests] = await pool.execute(
-      `SELECT r.*, u.name as requester_name, u.phone as requester_phone, u.avatar_url as requester_avatar, u.avatar_public_id as requester_avatar_key 
-       FROM blood_requests r JOIN users u ON r.requester_id = u.id WHERE r.id = ?`,
-      [req.params.id]
-    );
+    const request = await requestRepository.findWithRequester(req.params.id);
+    if (!request) return res.status(404).json({ error: 'Request not found.' });
 
-    if (requests.length === 0) return res.status(404).json({ error: 'Request not found.' });
+    const responses = await responseRepository.getResponsesForRequest(req.params.id);
 
-    const [assignedDonors] = await pool.execute(
-      `SELECT ad.*, u.name as donor_name, u.phone as donor_phone
-       FROM assigned_donors ad
-       JOIN donors d ON ad.donor_id = d.id
-       JOIN users u ON d.user_id = u.id
-       WHERE ad.request_id = ?`,
-      [req.params.id]
-    );
-
-    const request = requests[0];
     if (request.requester_avatar_key) {
       request.requester_avatar = await getSignedFileUrl(request.requester_avatar_key);
     }
-    request.assignedDonors = assignedDonors;
+    request.assignedDonors = responses;
 
     res.json({ success: true, request });
   } catch (error) {
+    console.error('Get request by id error:', error);
     res.status(500).json({ error: 'Failed to fetch request.' });
   }
 };
@@ -177,45 +153,40 @@ exports.getRequestById = async (req, res) => {
 exports.respondToRequest = async (req, res) => {
   try {
     const { action } = req.body; // 'accept' or 'decline'
-    const [requests] = await pool.execute('SELECT * FROM blood_requests WHERE id = ?', [req.params.id]);
-    if (requests.length === 0) return res.status(404).json({ error: 'Request not found.' });
-    
-    const request = requests[0];
 
-    const [donors] = await pool.execute('SELECT id, requests_accepted, requests_declined FROM donors WHERE user_id = ?', [req.user.id]);
-    if (donors.length === 0) return res.status(404).json({ error: 'Donor profile not found.' });
+    const request = await requestRepository.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'Request not found.' });
 
-    const donor = donors[0];
+    const donorProfile = await donorRepository.findByUserId(req.user.id);
+    if (!donorProfile) return res.status(404).json({ error: 'Donor profile not found.' });
+
     const newStatus = action === 'accept' ? 'accepted' : 'declined';
 
-    const [assigned] = await pool.execute(
-      'SELECT id FROM assigned_donors WHERE request_id = ? AND donor_id = ?',
-      [request.id, donor.id]
-    );
-
-    if (assigned.length === 0) {
-      await pool.execute(
-        `INSERT INTO assigned_donors (request_id, donor_id, units, status, accepted_at) VALUES (?, ?, ?, ?, ?)`,
-        [request.id, donor.id, Math.min(1, request.units_required - request.units_fulfilled), newStatus, action === 'accept' ? new Date() : null]
-      );
-    } else {
-      await pool.execute(
-        `UPDATE assigned_donors SET status = ?, accepted_at = ? WHERE id = ?`,
-        [newStatus, action === 'accept' ? new Date() : null, assigned[0].id]
-      );
-    }
+    await responseRepository.upsertResponse({
+      requestId: request.id,
+      donorProfileId: donorProfile.id,
+      units: Math.min(1, request.units_required - request.units_fulfilled),
+      status: newStatus,
+      acceptedAt: action === 'accept' ? new Date() : null
+    });
 
     if (action === 'accept') {
-      await pool.execute('UPDATE blood_requests SET status = ? WHERE id = ?', ['donor_found', request.id]);
-      await pool.execute(
-        `INSERT INTO request_timelines (request_id, status, note, updated_by) VALUES (?, 'donor_found', ?, ?)`,
-        [request.id, `Donor ${req.user.name} accepted the request`, req.user.id]
-      );
+      await requestRepository.updateStatus(request.id, 'donor_found');
+
+      const profile = await userRepository.findFullProfileById(req.user.id);
+      const donorName = profile?.name || 'A donor';
+
+      await timelineRepository.addEntry({
+        requestId: request.id,
+        status: 'donor_found',
+        note: `Donor ${donorName} accepted the request`,
+        updatedBy: req.user.id
+      });
 
       await createNotification(request.requester_id, {
         type: 'donor_found',
         title: '🎉 Donor Found!',
-        body: `${req.user.name} has accepted your blood request.`,
+        body: `${donorName} has accepted your blood request.`,
         data: { requestId: request.id }
       });
 
@@ -223,17 +194,20 @@ exports.respondToRequest = async (req, res) => {
       emitToUser(request.requester_id.toString(), 'donor:accepted', { requestId: request.id });
     }
 
-    let reqAccepted = donor.requests_accepted + (action === 'accept' ? 1 : 0);
-    let reqDeclined = donor.requests_declined + (action === 'decline' ? 1 : 0);
-    let responseRate = Math.round((reqAccepted / (reqAccepted + reqDeclined)) * 100) || 100;
+    // Update donor response stats
+    const reqAccepted = donorProfile.requests_accepted + (action === 'accept' ? 1 : 0);
+    const reqDeclined = donorProfile.requests_declined + (action === 'decline' ? 1 : 0);
+    const responseRate = Math.round((reqAccepted / (reqAccepted + reqDeclined)) * 100) || 100;
 
-    await pool.execute(
-      'UPDATE donors SET requests_accepted = ?, requests_declined = ?, response_rate = ? WHERE id = ?',
-      [reqAccepted, reqDeclined, responseRate, donor.id]
-    );
+    await donorRepository.updateByUserId(req.user.id, {
+      requests_accepted: reqAccepted,
+      requests_declined: reqDeclined,
+      response_rate: responseRate
+    });
 
     res.json({ success: true, message: `Request ${action}ed successfully.` });
   } catch (error) {
+    console.error('Respond to request error:', error);
     res.status(500).json({ error: 'Failed to respond to request.' });
   }
 };
@@ -248,23 +222,20 @@ exports.updateRequestStatus = async (req, res) => {
       return res.status(400).json({ error: 'Invalid status.' });
     }
 
-    const [requests] = await pool.execute('SELECT * FROM blood_requests WHERE id = ?', [req.params.id]);
-    if (requests.length === 0) return res.status(404).json({ error: 'Request not found.' });
-    
-    const request = requests[0];
+    const request = await requestRepository.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'Request not found.' });
 
     const isCompleted = status === 'completed';
     const fulfilledUnits = isCompleted ? request.units_required : request.units_fulfilled;
 
-    await pool.execute(
-      'UPDATE blood_requests SET status = ?, units_fulfilled = ? WHERE id = ?',
-      [status, fulfilledUnits, request.id]
-    );
+    await requestRepository.updateStatus(request.id, status, fulfilledUnits);
 
-    await pool.execute(
-      `INSERT INTO request_timelines (request_id, status, note, updated_by) VALUES (?, ?, ?, ?)`,
-      [request.id, status, note || getStatusNote(status), req.user.id]
-    );
+    await timelineRepository.addEntry({
+      requestId: request.id,
+      status,
+      note: note || getStatusNote(status),
+      updatedBy: req.user.id
+    });
 
     emitToRequest(request.id.toString(), 'request:status', { status });
 
@@ -282,6 +253,7 @@ exports.updateRequestStatus = async (req, res) => {
 
     res.json({ success: true, message: 'Status updated' });
   } catch (error) {
+    console.error('Update request status error:', error);
     res.status(500).json({ error: 'Failed to update status.' });
   }
 };
@@ -293,9 +265,6 @@ exports.uploadMedicalReport = async (req, res) => {
 
     const reportUrl = await getSignedFileUrl(req.file.key);
     const aiVerification = await verifyMedicalReport(reportUrl);
-    
-    // In SQL, we can store this in a JSON column or new table. Since we don't have it in schema, we will skip or alter it.
-    // Assuming we added a 'medical_report_url' and 'medical_report_verification' JSON column to blood_requests.
 
     res.json({
       success: true,
@@ -307,6 +276,7 @@ exports.uploadMedicalReport = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('Upload report error:', error);
     res.status(500).json({ error: 'Upload failed.' });
   }
 };
@@ -316,21 +286,17 @@ exports.uploadMedicalReport = async (req, res) => {
 async function processRequestAsync(requestId) {
   setTimeout(async () => {
     try {
-      const [requests] = await pool.execute('SELECT * FROM blood_requests WHERE id = ?', [requestId]);
-      if (requests.length === 0) return;
-      const request = requests[0];
+      const request = await requestRepository.findById(requestId);
+      if (!request) return;
 
       if (request.hospital_lat && request.hospital_lng) {
-        let sql = `
-          SELECT d.*, u.name, u.fcm_token, u.location_lat, u.location_lng,
-                (6371 * acos(cos(radians(?)) * cos(radians(u.location_lat)) * cos(radians(u.location_lng) - radians(?)) + sin(radians(?)) * sin(radians(u.location_lat)))) AS distance
-          FROM donors d
-          JOIN users u ON d.user_id = u.id
-          WHERE d.is_available = 1 AND u.blood_group = ?
-          HAVING distance <= 30
-          LIMIT 15
-        `;
-        const [nearbyDonors] = await pool.query(sql, [request.hospital_lat, request.hospital_lng, request.hospital_lat, request.blood_group]);
+        const nearbyDonors = await donorRepository.findNearbyDonors({
+          lat: request.hospital_lat,
+          lng: request.hospital_lng,
+          bloodGroups: [request.blood_group],
+          maxDistanceKm: 30,
+          limit: 15
+        });
         await notifyNearbyDonors(nearbyDonors, request);
       }
     } catch (err) {
@@ -354,19 +320,13 @@ async function analyzeRequest(data, userId, userCreatedAt) {
     score += 20;
   }
 
-  const [recentRequests] = await pool.execute(
-    `SELECT id FROM blood_requests WHERE requester_id = ? AND blood_group = ? AND created_at >= NOW() - INTERVAL 1 HOUR`,
-    [userId, data.bloodGroup]
-  );
-  if (recentRequests.length > 0) {
+  const isDuplicate = await requestRepository.findRecentDuplicate(userId, data.bloodGroup);
+  if (isDuplicate) {
     flags.push('duplicate_request');
     score += 40;
   }
 
-  return {
-    fakeDetectionScore: score,
-    flags
-  };
+  return { fakeDetectionScore: score, flags };
 }
 
 function getStatusNote(status) {
@@ -391,19 +351,10 @@ function getStatusTitle(status) {
 
 async function awardBadges(requestId) {
   try {
-    const [assigned] = await pool.execute(
-      `SELECT d.user_id FROM assigned_donors ad JOIN donors d ON ad.donor_id = d.id WHERE ad.request_id = ? AND ad.status = 'donated' LIMIT 1`,
-      [requestId]
-    );
-    
-    if (assigned.length === 0) return;
-    
-    const userId = assigned[0].user_id;
+    const donated = await responseRepository.findDonatedForRequest(requestId);
+    if (!donated || donated.length === 0) return;
 
-    const [users] = await pool.execute('SELECT total_donations FROM users WHERE id = ?', [userId]);
-    if (users.length === 0) return;
-
-    let donations = users[0].total_donations + 1;
-    await pool.execute('UPDATE users SET total_donations = ? WHERE id = ?', [donations, userId]);
+    const { user_id: userId } = donated[0];
+    await donorRepository.recordDonation(userId);
   } catch (e) { /* silent */ }
 }

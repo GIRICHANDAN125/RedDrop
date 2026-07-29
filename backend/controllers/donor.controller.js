@@ -1,5 +1,5 @@
-const { pool } = require('../config/database');
-const { priorityQueue } = require('../utils/dsa.utils');
+const donorRepository = require('../repositories/donor.repository');
+const userRepository = require('../repositories/user.repository');
 const { getSignedFileUrl } = require('../config/aws');
 
 const hydrateDonorAvatars = async (donors) => {
@@ -28,35 +28,22 @@ exports.getNearbyDonors = async (req, res) => {
     const maxDistanceKm = maxDistance / 1000;
     const compatibleGroups = getCompatibleBloodGroups(bloodGroup);
 
-    let sql = `
-      SELECT d.*, u.name, u.phone, u.avatar_url, u.avatar_public_id, u.rating_average, u.total_donations, u.last_seen, u.location_lat, u.location_lng,
-             (6371 * acos(cos(radians(?)) * cos(radians(u.location_lat)) * cos(radians(u.location_lng) - radians(?)) + sin(radians(?)) * sin(radians(u.location_lat)))) AS distance
-      FROM donors d
-      JOIN users u ON d.user_id = u.id
-      WHERE d.is_available = 1 AND d.is_fit_to_donate = 1
-    `;
-    
-    let params = [parseFloat(latitude), parseFloat(longitude), parseFloat(latitude)];
+    const donors = await donorRepository.findNearbyDonors({
+      lat: parseFloat(latitude),
+      lng: parseFloat(longitude),
+      bloodGroups: compatibleGroups,
+      maxDistanceKm,
+      limit: parseInt(limit)
+    });
 
-    if (bloodGroup && compatibleGroups.length > 0) {
-      const placeholders = compatibleGroups.map(() => '?').join(',');
-      sql += ` AND u.blood_group IN (${placeholders})`;
-      params.push(...compatibleGroups);
-    }
-
-    sql += ` HAVING distance <= ? ORDER BY distance ASC LIMIT ?`;
-    params.push(maxDistanceKm, parseInt(limit));
-
-    const [donors] = await pool.execute(sql, params);
     await hydrateDonorAvatars(donors);
 
-    // DSA: Priority Queue sort by urgency score (distance + response rate + availability)
+    // DSA: Score donors by urgency (distance + response rate + availability)
     const scoredDonors = donors.map(donor => ({
       ...donor,
       score: calculateDonorScore(donor, donor.distance)
     }));
 
-    // Sort by score descending (best match first)
     scoredDonors.sort((a, b) => b.score - a.score);
 
     res.json({
@@ -75,37 +62,15 @@ exports.searchDonors = async (req, res) => {
   try {
     const { query, bloodGroup, city, state, available } = req.query;
 
-    let sql = `
-      SELECT d.*, u.name, u.phone, u.avatar_url, u.avatar_public_id, u.rating_average, u.total_donations
-      FROM donors d
-      JOIN users u ON d.user_id = u.id
-      WHERE 1=1
-    `;
-    let params = [];
+    const donors = await donorRepository.searchDonors({
+      bloodGroup,
+      city,
+      state,
+      available,
+      query,
+      limit: 50
+    });
 
-    if (bloodGroup) {
-      sql += ` AND u.blood_group = ?`;
-      params.push(bloodGroup);
-    }
-    if (city) {
-      sql += ` AND u.city LIKE ?`;
-      params.push(`%${city}%`);
-    }
-    if (state) {
-      sql += ` AND u.state LIKE ?`;
-      params.push(`%${state}%`);
-    }
-    if (available === 'true') {
-      sql += ` AND d.is_available = 1`;
-    }
-    if (query) {
-      sql += ` AND u.name LIKE ?`;
-      params.push(`%${query}%`);
-    }
-
-    sql += ` LIMIT 50`;
-
-    const [donors] = await pool.execute(sql, params);
     await hydrateDonorAvatars(donors);
 
     res.json({ success: true, count: donors.length, donors });
@@ -118,14 +83,11 @@ exports.searchDonors = async (req, res) => {
 // GET /api/donors/profile
 exports.getMyDonorProfile = async (req, res) => {
   try {
-    const [donors] = await pool.execute(
-      'SELECT d.*, u.name, u.email, u.phone, u.blood_group, u.city FROM donors d JOIN users u ON d.user_id = u.id WHERE d.user_id = ?',
-      [req.user.id]
-    );
-
-    if (donors.length === 0) return res.status(404).json({ error: 'Donor profile not found.' });
-    res.json({ success: true, donor: donors[0] });
+    const donor = await donorRepository.findFullProfileByUserId(req.user.id);
+    if (!donor) return res.status(404).json({ error: 'Donor profile not found.' });
+    res.json({ success: true, donor });
   } catch (error) {
+    console.error('Get donor profile error:', error);
     res.status(500).json({ error: 'Failed to fetch donor profile.' });
   }
 };
@@ -134,28 +96,31 @@ exports.getMyDonorProfile = async (req, res) => {
 exports.updateDonorProfile = async (req, res) => {
   try {
     const { hemoglobin_level, weight, age, emergency_contact_phone, city, blood_group } = req.body;
-    
-    let is_profile_complete = (blood_group && city && weight && age && emergency_contact_phone) ? 1 : 0;
 
-    await pool.execute(
-      `UPDATE donors SET hemoglobin_level = COALESCE(?, hemoglobin_level), weight = COALESCE(?, weight), age = COALESCE(?, age), emergency_contact_phone = COALESCE(?, emergency_contact_phone), is_profile_complete = ? WHERE user_id = ?`,
-      [hemoglobin_level || null, weight || null, age || null, emergency_contact_phone || null, is_profile_complete, req.user.id]
-    );
+    const is_profile_complete = (blood_group && city && weight && age && emergency_contact_phone) ? true : false;
 
-    if (city || blood_group) {
-      await pool.execute(
-        'UPDATE users SET city = COALESCE(?, city), blood_group = COALESCE(?, blood_group) WHERE id = ?',
-        [city || null, blood_group || null, req.user.id]
-      );
+    await donorRepository.updateByUserId(req.user.id, {
+      ...(hemoglobin_level !== undefined && { hemoglobin_level }),
+      ...(weight !== undefined && { weight }),
+      ...(age !== undefined && { age }),
+      is_profile_complete
+    });
+
+    // Update emergency_contact_phone and location fields in user_profiles
+    const profileUpdate = {};
+    if (emergency_contact_phone) profileUpdate.emergency_contact_phone = emergency_contact_phone;
+    if (city) profileUpdate.city = city;
+    if (blood_group) profileUpdate.blood_group = blood_group;
+
+    if (Object.keys(profileUpdate).length > 0) {
+      await userRepository.upsertProfile(req.user.id, profileUpdate);
     }
 
-    const [donors] = await pool.execute(
-      'SELECT d.*, u.name, u.city, u.blood_group FROM donors d JOIN users u ON d.user_id = u.id WHERE d.user_id = ?',
-      [req.user.id]
-    );
+    const donor = await donorRepository.findFullProfileByUserId(req.user.id);
 
-    res.json({ success: true, message: 'Profile updated!', donor: donors[0] });
+    res.json({ success: true, message: 'Profile updated!', donor });
   } catch (error) {
+    console.error('Update donor profile error:', error);
     res.status(500).json({ error: 'Update failed.' });
   }
 };
@@ -164,21 +129,20 @@ exports.updateDonorProfile = async (req, res) => {
 exports.toggleAvailability = async (req, res) => {
   try {
     const { isAvailable } = req.body;
-    const isAvailInt = isAvailable ? 1 : 0;
-    
-    await pool.execute(
-      'UPDATE donors SET is_available = ? WHERE user_id = ?',
-      [isAvailInt, req.user.id]
-    );
 
-    const [donors] = await pool.execute('SELECT is_available FROM donors WHERE user_id = ?', [req.user.id]);
+    await donorRepository.updateByUserId(req.user.id, {
+      is_available: isAvailable ? 1 : 0
+    });
+
+    const donor = await donorRepository.findByUserId(req.user.id);
 
     res.json({
       success: true,
       message: `You are now ${isAvailable ? 'available' : 'unavailable'} for donation.`,
-      availability: donors[0].is_available === 1
+      availability: donor?.is_available === 1
     });
   } catch (error) {
+    console.error('Toggle availability error:', error);
     res.status(500).json({ error: 'Failed to update availability.' });
   }
 };
@@ -186,15 +150,13 @@ exports.toggleAvailability = async (req, res) => {
 // GET /api/donors/:id
 exports.getDonorById = async (req, res) => {
   try {
-    const [donors] = await pool.execute(
-      'SELECT d.*, u.name, u.avatar_url, u.avatar_public_id, u.rating_average, u.total_donations FROM donors d JOIN users u ON d.user_id = u.id WHERE d.id = ?',
-      [req.params.id]
-    );
+    const donor = await donorRepository.findFullProfileById(req.params.id);
+    if (!donor) return res.status(404).json({ error: 'Donor not found.' });
 
-    if (donors.length === 0) return res.status(404).json({ error: 'Donor not found.' });
-    await hydrateDonorAvatars(donors);
-    res.json({ success: true, donor: donors[0] });
+    await hydrateDonorAvatars([donor]);
+    res.json({ success: true, donor });
   } catch (error) {
+    console.error('Get donor by id error:', error);
     res.status(500).json({ error: 'Failed to fetch donor.' });
   }
 };

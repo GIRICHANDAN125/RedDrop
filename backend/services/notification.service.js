@@ -1,19 +1,16 @@
-const { pool } = require('../config/database');
+const notificationRepository = require('../repositories/notification.repository');
 const { emitToUser } = require('../config/socket');
 
 exports.createNotification = async (userId, data) => {
   try {
-    const [result] = await pool.execute(
-      'INSERT INTO notifications (recipient_id, type, title, body, data, priority) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, data.type, data.title, data.body, data.data ? JSON.stringify(data.data) : null, data.priority || 'normal']
-    );
-
-    const [notifs] = await pool.execute('SELECT * FROM notifications WHERE id = ?', [result.insertId]);
-    const notification = notifs[0];
-
-    if (notification.data) {
-      notification.data = JSON.parse(notification.data);
-    }
+    const notification = await notificationRepository.createNotification({
+      recipientId: userId,
+      type: data.type,
+      title: data.title,
+      body: data.body,
+      data: data.data || null,
+      priority: data.priority || 'normal'
+    });
 
     // Real-time push via socket
     emitToUser(userId.toString(), 'notification:new', notification);
@@ -47,43 +44,18 @@ exports.notifyNearbyDonors = async (donors, request) => {
 };
 
 exports.getUserNotifications = async (userId, { page = 1, limit = 20, unreadOnly = false }) => {
-  let sql = 'SELECT * FROM notifications WHERE recipient_id = ?';
-  let params = [userId];
-
-  if (unreadOnly) {
-    sql += ' AND is_read = 0';
-  }
-
-  const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as total');
-  const [countRows] = await pool.execute(countSql, params);
-  const total = countRows[0].total;
-
-  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  const limitInt = parseInt(limit);
-  const offsetInt = (parseInt(page) - 1) * limitInt;
-  params.push(limitInt, offsetInt);
-
-  const [notifications] = await pool.query(sql, params);
-
-  notifications.forEach(n => {
-    if (n.data) n.data = JSON.parse(n.data);
+  const { notifications, total } = await notificationRepository.getForUser(userId, {
+    page,
+    limit,
+    unreadOnly
   });
-
-  return { notifications, unreadCount: unreadOnly ? total : null }; // unreadCount calculation can be improved if needed
+  return { notifications, unreadCount: unreadOnly ? total : null };
 };
 
 exports.markAsRead = async (userId, notificationIds) => {
-  if (!notificationIds || notificationIds.length === 0) return;
-  const placeholders = notificationIds.map(() => '?').join(',');
-  await pool.query(
-    `UPDATE notifications SET is_read = 1, read_at = NOW() WHERE recipient_id = ? AND id IN (${placeholders})`,
-    [userId, ...notificationIds]
-  );
+  await notificationRepository.markAsRead(userId, notificationIds);
 };
 
 exports.markAllAsRead = async (userId) => {
-  await pool.execute(
-    'UPDATE notifications SET is_read = 1, read_at = NOW() WHERE recipient_id = ? AND is_read = 0',
-    [userId]
-  );
+  await notificationRepository.markAllAsRead(userId);
 };

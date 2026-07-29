@@ -16,6 +16,15 @@ class UserRepository extends BaseRepository {
     return this.findOneBy('email', email);
   }
 
+  /** Check if a phone number is already taken in user_profiles. */
+  async findByPhone(phone) {
+    const [rows] = await pool.execute(
+      'SELECT id FROM user_profiles WHERE phone = ? LIMIT 1',
+      [phone]
+    );
+    return rows[0] || null;
+  }
+
   /** users + user_profiles merged, plus an array of role names. */
   async findFullProfileById(userId) {
     const [rows] = await pool.execute(

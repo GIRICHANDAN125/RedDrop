@@ -82,12 +82,16 @@ SELECT
     preferred_contact_method, max_distance_km, created_at, updated_at
 FROM reddropai.donors;
 
-UPDATE reddropai_v2.user_profiles up
-JOIN reddropai.donors d ON d.user_id = up.user_id
-SET up.emergency_contact_name     = d.emergency_contact_name,
-    up.emergency_contact_phone    = d.emergency_contact_phone,
+UPDATE reddropai_v2.user_profiles AS up
+INNER JOIN reddropai.donors AS d
+    ON d.user_id = up.user_id
+SET
+    up.emergency_contact_name = d.emergency_contact_name,
+    up.emergency_contact_phone = d.emergency_contact_phone,
     up.emergency_contact_relation = d.emergency_contact_relation
-WHERE d.emergency_contact_name IS NOT NULL;
+WHERE
+    up.user_id > 0
+    AND d.emergency_contact_name IS NOT NULL;
 
 -- ---------------------------------------------------------------------
 -- 5. hospital_profiles — V1 had no dedicated hospital table; users with
