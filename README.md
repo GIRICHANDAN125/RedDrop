@@ -46,7 +46,7 @@ graph TD
     Server -->|Uploads| S3[Amazon S3]
 ```
 
-## 📂 Project Structure
+## 📂 Project Structure version 
 
 ```text
 RedDropAI/
