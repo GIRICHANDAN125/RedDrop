@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, StatusBar
 } from 'react-native';
 import Animated, { FadeInDown, FadeInUp, useSharedValue, useAnimatedStyle, withSequence, withTiming } from 'react-native-reanimated';
+import { useAuth } from '../../context/AuthContext';
 import { authAPI } from '../../api/client';
 import Button from '../../components/common/Button';
 import { Colors, Typography, Spacing, Radius } from '../../utils/theme';
@@ -46,6 +47,8 @@ const OTPVerificationScreen = ({ navigation, route }) => {
     );
   };
 
+  const { completePendingVerification } = useAuth();
+
   const handleVerify = async () => {
     const otpString = otp.join('');
     if (otpString.length < 6) {
@@ -61,7 +64,7 @@ const OTPVerificationScreen = ({ navigation, route }) => {
       if (purpose === 'password_reset') {
         navigation.navigate('ResetPassword', { email, otp: otpString });
       } else {
-        navigation.navigate('Main');
+        await completePendingVerification();
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Invalid OTP. Please try again.');

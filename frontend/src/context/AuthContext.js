@@ -11,6 +11,8 @@ const initialState = {
   token: null,
   isLoading: true,
   isAuthenticated: false,
+  requiresVerification: false,
+  pendingAuth: null,
   error: null
 };
 
@@ -19,7 +21,36 @@ function authReducer(state, action) {
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
     case 'LOGIN_SUCCESS':
-      return { ...state, user: action.payload.user, token: action.payload.token, isAuthenticated: true, isLoading: false, error: null };
+      return {
+        ...state,
+        user: action.payload.user,
+        token: action.payload.token,
+        isAuthenticated: true,
+        requiresVerification: false,
+        pendingAuth: null,
+        isLoading: false,
+        error: null
+      };
+    case 'SET_PENDING_AUTH':
+      return {
+        ...state,
+        requiresVerification: true,
+        pendingAuth: action.payload,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null
+      };
+    case 'VERIFY_SUCCESS':
+      return {
+        ...state,
+        user: state.pendingAuth?.user ?? state.user,
+        token: state.pendingAuth?.token ?? state.token,
+        isAuthenticated: true,
+        requiresVerification: false,
+        pendingAuth: null,
+        isLoading: false,
+        error: null
+      };
     case 'UPDATE_USER':
       return { ...state, user: { ...state.user, ...action.payload } };
     case 'LOGOUT':
@@ -86,15 +117,10 @@ export const AuthProvider = ({ children }) => {
       const response = await api.post('/auth/register', userData);
       const data = response.data || {};
 
-      try {
-        if (data.token && data.user) {
-          await saveAuth(data.token, data.user);
-        }
-      } catch (storageError) {
-        console.warn('Registration succeeded, but auth persistence failed:', storageError);
-      }
-
-      if (data.token && data.user) {
+      if (data.requiresVerification) {
+        dispatch({ type: 'SET_PENDING_AUTH', payload: { token: data.token, user: data.user } });
+      } else if (data.token && data.user) {
+        await saveAuth(data.token, data.user);
         dispatch({ type: 'LOGIN_SUCCESS', payload: data });
       }
 
@@ -103,6 +129,16 @@ export const AuthProvider = ({ children }) => {
       const message = error.response?.data?.error || 'Registration failed.';
       return { success: false, error: message };
     }
+  };
+
+  const completePendingVerification = async () => {
+    if (!state.pendingAuth?.token || !state.pendingAuth?.user) {
+      return false;
+    }
+
+    await saveAuth(state.pendingAuth.token, state.pendingAuth.user);
+    dispatch({ type: 'VERIFY_SUCCESS' });
+    return true;
   };
 
   const logout = async () => {
@@ -132,7 +168,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout, updateUser }}>
+    <AuthContext.Provider value={{ ...state, login, register, logout, updateUser, completePendingVerification }}>
       {children}
     </AuthContext.Provider>
   );
