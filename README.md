@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/Platform-Mobile-blue?style=for-the-badge" alt="Platform" />
   <img src="https://img.shields.io/badge/Database-MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="Database" />
   
-  <h1>🩸 RedDrop AI</h1>
+  <h1>🩸 RedDrop</h1>
   <p><strong>Emergency Blood Donor & Real-Time Tracking System</strong></p>
 </div>
 
