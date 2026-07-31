@@ -85,8 +85,13 @@ const RequestDetailScreen = ({ navigation, route }) => {
   };
 
   const openMaps = () => {
-    if (!request?.hospital?.location?.coordinates) return;
-    const [lng, lat] = request.hospital.location.coordinates;
+    let lat = request.hospital?.location?.coordinates?.[1] || request.hospital_lat || request.hospital?.lat;
+    let lng = request.hospital?.location?.coordinates?.[0] || request.hospital_lng || request.hospital?.lng;
+    if (!lat || !lng) {
+      const addressStr = encodeURIComponent(request.hospital?.name || request.hospital_name || request.hospital_city || 'Hospital');
+      Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${addressStr}`);
+      return;
+    }
     const url = `https://maps.google.com/?q=${lat},${lng}`;
     Linking.openURL(url);
   };
@@ -101,11 +106,20 @@ const RequestDetailScreen = ({ navigation, route }) => {
 
   if (!request) return null;
 
-  const emergencyColor = EMERGENCY_COLORS[request.emergencyLevel] || Colors.primary;
+  const emergencyLevel = request.emergencyLevel || request.emergency_level || 'high';
+  const emergencyColor = EMERGENCY_COLORS[emergencyLevel] || Colors.primary;
   const statusInfo = STATUS_LABELS[request.status] || { label: request.status, color: Colors.textMuted };
-  const isDonor = user?.role === 'donor';
-  const isRequester = request.requester?._id === user?._id || request.requester === user?._id;
-  const myDonorEntry = request.assignedDonors?.find(d => d.donor?.user?._id === user?._id || d.donor?.user === user?._id);
+  const isDonor = user?.roles?.includes('donor') || user?.role === 'donor';
+
+  const requesterId = request.requester_id || request.requester?.id || request.requester?._id || request.requester;
+  const currentUserId = user?.id || user?._id;
+  const isRequester = requesterId && currentUserId && (String(requesterId) === String(currentUserId));
+
+  const myDonorEntry = request.assignedDonors?.find(d => {
+    const dUserId = d.user_id || d.donor?.user_id || d.donor?.user?.id || d.donor?.user?._id;
+    return dUserId && currentUserId && (String(dUserId) === String(currentUserId));
+  });
+
   const hasResponded = !!myDonorEntry;
   const canRespond = isDonor && !hasResponded && ['searching', 'pending'].includes(request.status);
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensions
+  View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensions, Linking, Alert
 } from 'react-native';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import Animated, { FadeInDown, SlideInUp } from 'react-native-reanimated';
@@ -147,17 +147,22 @@ const NearbyDonorsScreen = ({ navigation }) => {
 
             {/* Donor markers */}
             {donors.map((donor, i) => {
-              if (!donor.location?.coordinates) return null;
-              const [lng, lat] = donor.location.coordinates;
-              const color = BloodGroupColors[donor.bloodGroup] || Colors.primary;
+              const lat = donor.location?.coordinates ? donor.location.coordinates[1] : parseFloat(donor.location_lat || donor.latitude);
+              const lng = donor.location?.coordinates ? donor.location.coordinates[0] : parseFloat(donor.location_lng || donor.longitude);
+              if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;
+
+              const bg = donor.bloodGroup || donor.blood_group || 'O+';
+              const color = BloodGroupColors[bg] || Colors.primary;
+              const donorId = donor.id || donor._id || i;
+
               return (
                 <Marker
-                  key={donor._id || i}
+                  key={donorId}
                   coordinate={{ latitude: lat, longitude: lng }}
                   onPress={() => focusDonor(donor)}
                 >
                   <View style={[styles.donorMarker, { borderColor: color }]}>
-                    <Text style={[styles.donorMarkerText, { color }]}>{donor.bloodGroup}</Text>
+                    <Text style={[styles.donorMarkerText, { color }]}>{bg}</Text>
                   </View>
                 </Marker>
               );
@@ -172,14 +177,18 @@ const NearbyDonorsScreen = ({ navigation }) => {
           {/* Selected donor card */}
           {selectedDonor && (
             <Animated.View entering={SlideInUp.duration(300)} style={styles.donorPreview}>
-              <DonorCard donor={selectedDonor} onContact={() => {}} onDismiss={() => setSelectedDonor(null)} />
+              <DonorCard
+                donor={selectedDonor}
+                onContact={() => handleContactDonor(selectedDonor)}
+                onDismiss={() => setSelectedDonor(null)}
+              />
             </Animated.View>
           )}
         </View>
       ) : (
         <FlatList
           data={donors}
-          keyExtractor={(item, i) => item._id || String(i)}
+          keyExtractor={(item, i) => item.id || item._id || String(i)}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
@@ -190,7 +199,11 @@ const NearbyDonorsScreen = ({ navigation }) => {
           }
           renderItem={({ item, index }) => (
             <Animated.View entering={FadeInDown.delay(index * 60).duration(400)}>
-              <DonorCard donor={item} onContact={() => {}} onDismiss={null} />
+              <DonorCard
+                donor={item}
+                onContact={() => handleContactDonor(item)}
+                onDismiss={null}
+              />
             </Animated.View>
           )}
         />
@@ -199,24 +212,42 @@ const NearbyDonorsScreen = ({ navigation }) => {
   );
 };
 
+const handleContactDonor = (donor) => {
+  const phone = donor.phone || donor.user?.phone;
+  if (phone) {
+    Linking.openURL(`tel:${phone}`);
+  } else {
+    alert(`Donor: ${donor.name || donor.user?.name || 'Emergency Donor'}\nContact details available upon emergency request match.`);
+  }
+};
+
 const DonorCard = ({ donor, onContact, onDismiss }) => {
-  const color = BloodGroupColors[donor.bloodGroup] || Colors.primary;
+  const bg = donor.bloodGroup || donor.blood_group || 'O+';
+  const color = BloodGroupColors[bg] || Colors.primary;
+  const name = donor.name || donor.user?.name || 'Anonymous Donor';
+  const city = donor.city || donor.location?.city || 'Nearby Location';
+  const totalDonations = donor.total_donations ?? donor.stats?.totalDonations ?? 0;
+  const responseRate = donor.response_rate ?? donor.stats?.responseRate;
+  const isAvailable = donor.is_available ?? donor.availability?.isAvailable ?? true;
+
   return (
     <Card style={styles.donorCard}>
       <View style={styles.donorCardRow}>
         <View style={[styles.donorAvatar, { backgroundColor: color + '20', borderColor: color + '40' }]}>
-          <Text style={styles.donorAvatarText}>{donor.user?.name?.[0] || '?'}</Text>
+          <Text style={styles.donorAvatarText}>{name[0] || '?'}</Text>
         </View>
         <View style={styles.donorInfo}>
-          <Text style={styles.donorName}>{donor.user?.name || 'Anonymous Donor'}</Text>
-          <Text style={styles.donorCity}>{donor.location?.city || 'Unknown location'}</Text>
+          <Text style={styles.donorName}>{name}</Text>
+          <Text style={styles.donorCity}>{city}</Text>
           <View style={styles.donorMeta}>
-            <View style={[styles.availDot, { backgroundColor: donor.availability?.isAvailable ? Colors.success : Colors.textMuted }]} />
-            <Text style={styles.donorMetaText}>{donor.stats?.totalDonations || 0} donations</Text>
-            {donor.stats?.responseRate && <Text style={styles.donorMetaText}>• {donor.stats.responseRate}% response</Text>}
+            <View style={[styles.availDot, { backgroundColor: isAvailable ? Colors.success : Colors.textMuted }]} />
+            <Text style={styles.donorMetaText}>{totalDonations} donations</Text>
+            {responseRate !== undefined && responseRate !== null && (
+              <Text style={styles.donorMetaText}>• {responseRate}% response</Text>
+            )}
           </View>
         </View>
-        <BloodGroupBadge group={donor.bloodGroup} size="md" />
+        <BloodGroupBadge group={bg} size="md" />
       </View>
       <View style={styles.donorActions}>
         <TouchableOpacity style={styles.contactBtn} onPress={onContact}>

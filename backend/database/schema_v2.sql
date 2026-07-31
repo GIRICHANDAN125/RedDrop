@@ -381,6 +381,104 @@ CREATE TABLE IF NOT EXISTS ai_matching_logs (
 
 CREATE INDEX idx_ai_matching_logs_request ON ai_matching_logs(request_id, final_score);
 
+-- ---------------------------------------------------------------------
+-- blood_banks — blood storage facilities & real-time inventory
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS blood_banks (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    hospital_profile_id INT NULL,
+    name                VARCHAR(150) NOT NULL,
+    address             VARCHAR(255) NULL,
+    city                VARCHAR(100) NOT NULL,
+    state               VARCHAR(100) NULL,
+    pincode             VARCHAR(20) NULL,
+    location_lat        DECIMAL(10, 8) NULL,
+    location_lng        DECIMAL(11, 8) NULL,
+    contact_number      VARCHAR(20) NULL,
+    units_available     JSON NULL,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (hospital_profile_id) REFERENCES hospital_profiles(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_blood_banks_location ON blood_banks(location_lat, location_lng);
+
+-- ---------------------------------------------------------------------
+-- donation_camps — blood drive events organized by NGOs / Hospitals
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS donation_camps (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    organizer_user_id  INT NOT NULL,
+    title              VARCHAR(150) NOT NULL,
+    description        TEXT NULL,
+    location_name      VARCHAR(255) NOT NULL,
+    address            VARCHAR(255) NULL,
+    city               VARCHAR(100) NOT NULL,
+    state              VARCHAR(100) NULL,
+    location_lat       DECIMAL(10, 8) NULL,
+    location_lng       DECIMAL(11, 8) NULL,
+    start_time         DATETIME NOT NULL,
+    end_time           DATETIME NOT NULL,
+    status             ENUM('upcoming', 'active', 'completed', 'cancelled') DEFAULT 'upcoming',
+    target_units       INT DEFAULT 50,
+    collected_units    INT DEFAULT 0,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organizer_user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_donation_camps_city ON donation_camps(city, status);
+
+-- ---------------------------------------------------------------------
+-- certificates — verified digital donation certificates with QR hashes
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS certificates (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    certificate_id      VARCHAR(50) NOT NULL UNIQUE,
+    donor_id            INT NOT NULL,
+    donation_history_id INT NULL,
+    qr_code_hash        VARCHAR(255) NOT NULL,
+    pdf_url             VARCHAR(255) NULL,
+    issued_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (donation_history_id) REFERENCES donation_history(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+-- badges & donor_badges — gamification & recognition achievements
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS badges (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(100) NOT NULL UNIQUE,
+    description   VARCHAR(255) NULL,
+    icon          VARCHAR(100) NULL,
+    criteria_type VARCHAR(50) NOT NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS donor_badges (
+    id        INT AUTO_INCREMENT PRIMARY KEY,
+    donor_id  INT NOT NULL,
+    badge_id  INT NOT NULL,
+    earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (badge_id) REFERENCES badges(id) ON DELETE CASCADE,
+    UNIQUE (donor_id, badge_id)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------------
+-- chats — messaging log between requester and responding donor
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS chats (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    request_id  INT NOT NULL,
+    sender_id   INT NOT NULL,
+    receiver_id INT NOT NULL,
+    message     TEXT NOT NULL,
+    is_read     BOOLEAN DEFAULT FALSE,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ---------------------------------------------------------------------

@@ -18,6 +18,9 @@ import CreateRequestScreen from '../screens/patient/CreateRequestScreen';
 import TrackingScreen from '../screens/shared/TrackingScreen';
 import NotificationsScreen from '../screens/shared/NotificationsScreen';
 import DonorProfileScreen from '../screens/donor/DonorProfileScreen';
+import ProfileScreen from '../screens/shared/ProfileScreen';
+import RequestDetailScreen from '../screens/shared/RequestDetailScreen';
+import RequestsScreen from '../screens/shared/RequestsScreen';
 
 import { Colors, Typography, Radius } from '../utils/theme';
 
@@ -73,7 +76,7 @@ function TabNavigator() {
       <Tab.Screen name="TrackRequest" component={TrackingScreen} options={{ tabBarLabel: 'Track' }} />
       <Tab.Screen
         name="Profile"
-        component={user?.role === 'donor' ? DonorProfileScreen : HomeScreen}
+        component={ProfileScreen}
         options={{ tabBarLabel: 'Profile' }}
       />
     </Tab.Navigator>
@@ -101,6 +104,8 @@ function MainStack() {
       <Stack.Screen name="NearbyDonors" component={NearbyDonorsScreen} />
       <Stack.Screen name="CreateRequest" component={CreateRequestScreen} />
       <Stack.Screen name="TrackRequest" component={TrackingScreen} />
+      <Stack.Screen name="RequestDetail" component={RequestDetailScreen} />
+      <Stack.Screen name="Requests" component={RequestsScreen} />
     </Stack.Navigator>
   );
 }

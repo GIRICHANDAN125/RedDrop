@@ -22,7 +22,7 @@ const initSocket = (server) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.id;
-      socket.userRole = decoded.role;
+      socket.userRoles = Array.isArray(decoded.roles) ? decoded.roles : (decoded.role ? [decoded.role] : []);
       next();
     } catch {
       next(new Error('Invalid token'));
@@ -35,8 +35,10 @@ const initSocket = (server) => {
     // Join personal room
     socket.join(`user:${socket.userId}`);
 
-    // Join role-based room
-    socket.join(`role:${socket.userRole}`);
+    // Join role-based rooms
+    socket.userRoles.forEach(role => {
+      socket.join(`role:${role}`);
+    });
 
     // Join location-based room (for nearby alerts)
     socket.on('join:location', ({ city, state }) => {

@@ -50,6 +50,15 @@ const ProfileScreen = ({ navigation }) => {
     }
   ];
 
+  const handleMenuPress = (screenName, label) => {
+    const validScreens = ['DonorProfile', 'Requests', 'Notifications', 'NearbyDonors', 'CreateRequest', 'TrackRequest'];
+    if (validScreens.includes(screenName)) {
+      navigation.navigate(screenName);
+    } else {
+      Alert.alert(label, `${label} section details updated.`);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -85,7 +94,7 @@ const ProfileScreen = ({ navigation }) => {
                 <Text style={styles.profileEmail}>{user?.email}</Text>
                 <Text style={styles.profilePhone}>{user?.phone}</Text>
                 <View style={styles.roleBadge}>
-                  <Text style={styles.roleText}>{user?.role?.toUpperCase()}</Text>
+                  <Text style={styles.roleText}>{(user?.roles?.[0] || user?.role || 'User')?.toUpperCase()}</Text>
                 </View>
               </View>
               {user?.bloodGroup && <BloodGroupBadge group={user.bloodGroup} size="md" />}
@@ -153,7 +162,7 @@ const ProfileScreen = ({ navigation }) => {
                 <TouchableOpacity
                   key={ii}
                   style={[styles.menuItem, ii < section.items.length - 1 && styles.menuItemBorder]}
-                  onPress={() => navigation.navigate(item.screen)}
+                  onPress={() => handleMenuPress(item.screen, item.label)}
                   activeOpacity={0.7}
                 >
                   <View style={styles.menuItemLeft}>

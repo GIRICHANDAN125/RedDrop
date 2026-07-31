@@ -104,7 +104,7 @@ const HomeScreen = ({ navigation }) => {
               { icon: '🩸', label: 'Request\nBlood', color: Colors.primary, screen: 'CreateRequest' },
               { icon: '🔍', label: 'Find\nDonors', color: '#4361EE', screen: 'NearbyDonors' },
               { icon: '📍', label: 'Track\nBlood', color: Colors.success, screen: 'TrackRequest' },
-              { icon: '🏥', label: 'Hospitals\nNearby', color: Colors.warning, screen: 'Hospitals' }
+              { icon: '🏥', label: 'Hospitals\nNearby', color: Colors.warning, screen: 'NearbyDonors' }
             ].map((action, i) => (
               <Animated.View key={action.label} entering={FadeInRight.delay(i * 80).duration(400)}>
                 <TouchableOpacity
@@ -155,32 +155,37 @@ const HomeScreen = ({ navigation }) => {
               <Text style={styles.emptyText}>No active emergency requests nearby</Text>
             </Card>
           ) : (
-            requests.map((req, i) => (
-              <Animated.View key={req._id} entering={SlideInRight.delay(i * 80).duration(400)}>
-                <Card
-                  style={styles.requestCard}
-                  onPress={() => navigation.navigate('RequestDetail', { id: req._id })}
-                >
-                  <View style={styles.requestHeader}>
-                    <View style={[styles.emergencyBadge, {
-                      backgroundColor: (EMERGENCY_COLORS[req.emergencyLevel] || Colors.primary) + '20',
-                      borderColor: (EMERGENCY_COLORS[req.emergencyLevel] || Colors.primary) + '50'
-                    }]}>
-                      <Text style={[styles.emergencyText, { color: EMERGENCY_COLORS[req.emergencyLevel] || Colors.primary }]}>
-                        {req.emergencyLevel?.toUpperCase()}
-                      </Text>
+            requests.map((req, i) => {
+              const reqId = req.id || req._id || req.request_id;
+              const hospitalName = req.hospital?.name || req.hospital_name || 'Medical Center';
+              const hospitalCity = req.hospital?.city || req.hospital_city || '';
+              return (
+                <Animated.View key={reqId || i} entering={SlideInRight.delay(i * 80).duration(400)}>
+                  <Card
+                    style={styles.requestCard}
+                    onPress={() => navigation.navigate('RequestDetail', { id: reqId })}
+                  >
+                    <View style={styles.requestHeader}>
+                      <View style={[styles.emergencyBadge, {
+                        backgroundColor: (EMERGENCY_COLORS[req.emergencyLevel || req.emergency_level] || Colors.primary) + '20',
+                        borderColor: (EMERGENCY_COLORS[req.emergencyLevel || req.emergency_level] || Colors.primary) + '50'
+                      }]}>
+                        <Text style={[styles.emergencyText, { color: EMERGENCY_COLORS[req.emergencyLevel || req.emergency_level] || Colors.primary }]}>
+                          {(req.emergencyLevel || req.emergency_level || 'high')?.toUpperCase()}
+                        </Text>
+                      </View>
+                      <BloodGroupBadge group={req.bloodGroup || req.blood_group} size="sm" />
                     </View>
-                    <BloodGroupBadge group={req.bloodGroup} size="sm" />
-                  </View>
-                  <Text style={styles.requestPatient}>{req.patientName}</Text>
-                  <Text style={styles.requestHospital}>🏥 {req.hospital?.name}, {req.hospital?.city}</Text>
-                  <View style={styles.requestFooter}>
-                    <Text style={styles.requestUnits}>🩸 {req.unitsRequired} units needed</Text>
-                    <Text style={styles.requestTime}>{timeAgo(req.createdAt)}</Text>
-                  </View>
-                </Card>
-              </Animated.View>
-            ))
+                    <Text style={styles.requestPatient}>{req.patientName || req.patient_name}</Text>
+                    <Text style={styles.requestHospital}>🏥 {hospitalName}{hospitalCity ? `, ${hospitalCity}` : ''}</Text>
+                    <View style={styles.requestFooter}>
+                      <Text style={styles.requestUnits}>🩸 {req.unitsRequired || req.units_required || 1} units needed</Text>
+                      <Text style={styles.requestTime}>{timeAgo(req.createdAt || req.created_at)}</Text>
+                    </View>
+                  </Card>
+                </Animated.View>
+              );
+            })
           )}
         </Animated.View>
 
