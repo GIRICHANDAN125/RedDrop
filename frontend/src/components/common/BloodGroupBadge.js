@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { BloodGroupColors, Colors, Radius, Typography } from '../../utils/theme';
+import { BloodGroupColors, BloodGroupColorsBg, Colors, Radius, Typography } from '../../utils/theme';
 
 const BloodGroupBadge = ({ group, size = 'md', showLabel = false }) => {
-  const color = BloodGroupColors[group] || Colors.primary;
+  const color   = BloodGroupColors[group]    || Colors.primary;
+  const colorBg  = BloodGroupColorsBg[group]  || Colors.primaryGlow;
 
   const sizes = {
     sm: { width: 32, height: 32, fontSize: 10 },
@@ -21,7 +22,7 @@ const BloodGroupBadge = ({ group, size = 'md', showLabel = false }) => {
         {
           width: currentSize.width,
           height: currentSize.height,
-          backgroundColor: color + '20',
+          backgroundColor: colorBg,
           borderColor: color + '60'
         }
       ]}>
