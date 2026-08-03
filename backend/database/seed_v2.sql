@@ -3,13 +3,6 @@
 -- For a FRESH install only (schema_v2.sql already seeds `roles` itself,
 -- idempotently, so this file focuses on optional demo/dev data).
 -- Do NOT run this against a production database.
---
--- NOTE ON THE ORIGINAL seed.sql: the V1 seed.sql opens with
--- `USE reddrop_ai;` while schema.sql creates database `reddropai`
--- (no underscore) — the two never actually matched, so V1's seed file
--- has likely never run successfully against a freshly-created V1 DB.
--- Flagging it here rather than silently fixing it, since it's not part
--- of this migration's job. V2 uses `reddropai_v2` consistently everywhere.
 -- =====================================================================
 
 USE reddropai_v2;
@@ -20,7 +13,9 @@ INSERT INTO roles (name, description) VALUES
     ('donor', 'Can respond to blood requests and donate'),
     ('patient', 'Can create blood requests for themselves or a dependent'),
     ('hospital', 'Verified hospital/blood bank account'),
-    ('admin', 'Platform administrator')
+    ('admin', 'Platform administrator'),
+    ('volunteer', 'Verified event & camp coordinator'),
+    ('organization', 'NGO / Corporate / College partner account')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
 
 -- ---------------------------------------------------------------------

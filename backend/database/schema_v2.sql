@@ -1,26 +1,5 @@
 -- =====================================================================
--- RedDrop AI V2 — Normalized Production Schema
--- =====================================================================
--- Design notes (read before editing):
---   * `users` is auth-only: email, verification state, deprecated password
---     column (kept nullable through the OTP migration in Phase 2, then
---     dropped), timestamps. Nothing else lives here.
---   * All profile data lives in `user_profiles` (1:1 with users).
---   * Roles are no longer a single ENUM column. `roles` + `user_roles`
---     give every user zero or more roles, addable at any time
---     ("Become Donor" / "Become Patient" / "Become Hospital").
---   * Role-specific data lives in donor_profiles / patient_profiles /
---     hospital_profiles, each 1:1 with users, created on demand when a
---     role is added.
---   * request_responses replaces assigned_donors (renamed for clarity —
---     a "response" is a donor's response to a request, which may or may
---     not turn into a donation) and now stores the AI match_score.
---   * donation_history is a durable ledger, independent of
---     request_responses so a donor's history survives even if a request
---     row is later deleted.
---   * otp_logs / activity_logs / audit_logs / socket_sessions /
---     ai_matching_logs are new observability/security tables with no
---     V1 equivalent.
+-- RedDrop AI V2 — Complete Frozen Production Schema
 -- =====================================================================
 
 CREATE DATABASE IF NOT EXISTS reddropai_v2
@@ -29,26 +8,19 @@ USE reddropai_v2;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
--- ---------------------------------------------------------------------
--- roles — fixed lookup table of assignable roles
--- ---------------------------------------------------------------------
+-- 1. Fixed Roles Lookup Table
 CREATE TABLE IF NOT EXISTS roles (
     id          INT AUTO_INCREMENT PRIMARY KEY,
-    name        ENUM('donor', 'patient', 'hospital', 'admin') NOT NULL UNIQUE,
+    name        ENUM('donor', 'patient', 'hospital', 'admin', 'volunteer', 'organization') NOT NULL UNIQUE,
     description VARCHAR(255) NULL,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------
--- users — auth core ONLY
--- ---------------------------------------------------------------------
+-- 2. Core Auth Users Table
 CREATE TABLE IF NOT EXISTS users (
     id             INT AUTO_INCREMENT PRIMARY KEY,
     email          VARCHAR(150) NOT NULL UNIQUE,
     email_verified BOOLEAN DEFAULT FALSE,
-    -- Deprecated: retained nullable only so Phase 1 can coexist with the
-    -- still-password-based V1 auth controller. Dropped entirely in Phase 2
-    -- once OTP-only login ships.
     password       VARCHAR(255) NULL,
     is_active      BOOLEAN DEFAULT TRUE,
     fcm_token      VARCHAR(255) NULL,
@@ -59,9 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX idx_users_email ON users(email);
 
--- ---------------------------------------------------------------------
--- user_roles — many-to-many, one user can hold several roles at once
--- ---------------------------------------------------------------------
+-- 3. User Roles Junction Table
 CREATE TABLE IF NOT EXISTS user_roles (
     id         INT AUTO_INCREMENT PRIMARY KEY,
     user_id    INT NOT NULL,
@@ -74,9 +44,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
 
 CREATE INDEX idx_user_roles_user ON user_roles(user_id);
 
--- ---------------------------------------------------------------------
--- user_profiles — the "Complete Your Profile" data, 1:1 with users
--- ---------------------------------------------------------------------
+-- 4. User Core Profiles Table (1:1 with users)
 CREATE TABLE IF NOT EXISTS user_profiles (
     id                          INT AUTO_INCREMENT PRIMARY KEY,
     user_id                     INT NOT NULL UNIQUE,
@@ -106,9 +74,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 CREATE INDEX idx_user_profiles_location ON user_profiles(location_lat, location_lng);
 CREATE INDEX idx_user_profiles_blood_group ON user_profiles(blood_group);
 
--- ---------------------------------------------------------------------
--- donor_profiles — created when a user adds the "donor" role
--- ---------------------------------------------------------------------
+-- 5. Donor Specific Profiles Table
 CREATE TABLE IF NOT EXISTS donor_profiles (
     id                       INT AUTO_INCREMENT PRIMARY KEY,
     user_id                  INT NOT NULL UNIQUE,
@@ -123,9 +89,8 @@ CREATE TABLE IF NOT EXISTS donor_profiles (
     lives_saved              INT DEFAULT 0,
     requests_accepted        INT DEFAULT 0,
     requests_declined        INT DEFAULT 0,
-    response_rate            DECIMAL(5, 2) DEFAULT 100,
+    response_rate            DECIMAL(5, 2) DEFAULT 100.00,
     is_verified              BOOLEAN DEFAULT FALSE,
-    preferred_contact_method ENUM('phone', 'app', 'both') DEFAULT 'both',
     max_distance_km          INT DEFAULT 20,
     created_at               DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -134,22 +99,17 @@ CREATE TABLE IF NOT EXISTS donor_profiles (
 
 CREATE INDEX idx_donor_profiles_available ON donor_profiles(is_available);
 
--- ---------------------------------------------------------------------
--- patient_profiles — created when a user adds the "patient" role
--- ---------------------------------------------------------------------
+-- 6. Patient Profiles Table
 CREATE TABLE IF NOT EXISTS patient_profiles (
     id                  INT AUTO_INCREMENT PRIMARY KEY,
     user_id             INT NOT NULL UNIQUE,
     primary_hospital_id INT NULL,
     medical_notes       TEXT NULL,
     created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------
--- hospital_profiles — created when a user adds the "hospital" role
--- ---------------------------------------------------------------------
+-- 7. Hospital Profiles Table
 CREATE TABLE IF NOT EXISTS hospital_profiles (
     id                        INT AUTO_INCREMENT PRIMARY KEY,
     user_id                   INT NOT NULL UNIQUE,
@@ -163,21 +123,47 @@ CREATE TABLE IF NOT EXISTS hospital_profiles (
     location_lng              DECIMAL(11, 8) NULL,
     contact_number            VARCHAR(20) NULL,
     is_verified               BOOLEAN DEFAULT FALSE,
-    verification_document_url VARCHAR(255) NULL,
-    verification_document_key VARCHAR(255) NULL,
     blood_bank_capacity       INT NULL,
     created_at                DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at                DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-ALTER TABLE patient_profiles
-    ADD CONSTRAINT fk_patient_primary_hospital
-    FOREIGN KEY (primary_hospital_id) REFERENCES hospital_profiles(id) ON DELETE SET NULL;
+-- 8. Organizations Table (NGOs, Colleges, Corporate Partners)
+CREATE TABLE IF NOT EXISTS organizations (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT NOT NULL UNIQUE,
+    name                VARCHAR(150) NOT NULL,
+    org_type            ENUM('ngo', 'college', 'corporate', 'community') NOT NULL,
+    registration_number VARCHAR(100) NULL,
+    city                VARCHAR(100) NOT NULL,
+    state               VARCHAR(100) NULL,
+    contact_person      VARCHAR(100) NULL,
+    contact_phone       VARCHAR(20) NULL,
+    is_verified         BOOLEAN DEFAULT FALSE,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------
--- blood_requests
--- ---------------------------------------------------------------------
+-- 9. Blood Banks & Inventory Table
+CREATE TABLE IF NOT EXISTS blood_banks (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    hospital_profile_id INT NULL,
+    name                VARCHAR(150) NOT NULL,
+    address             VARCHAR(255) NULL,
+    city                VARCHAR(100) NOT NULL,
+    state               VARCHAR(100) NULL,
+    pincode             VARCHAR(20) NULL,
+    location_lat        DECIMAL(10, 8) NULL,
+    location_lng        DECIMAL(11, 8) NULL,
+    contact_number      VARCHAR(20) NULL,
+    units_available     JSON NULL,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (hospital_profile_id) REFERENCES hospital_profiles(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_blood_banks_location ON blood_banks(location_lat, location_lng);
+
+-- 10. Emergency Blood Requests Table
 CREATE TABLE IF NOT EXISTS blood_requests (
     id                       INT AUTO_INCREMENT PRIMARY KEY,
     request_id               VARCHAR(50) NOT NULL UNIQUE,
@@ -213,10 +199,7 @@ CREATE INDEX idx_blood_requests_status ON blood_requests(status);
 CREATE INDEX idx_blood_requests_blood_group ON blood_requests(blood_group);
 CREATE INDEX idx_blood_requests_emergency ON blood_requests(emergency_level, status);
 
--- ---------------------------------------------------------------------
--- request_responses — replaces assigned_donors; a donor's response to a
--- request (may or may not become a completed donation)
--- ---------------------------------------------------------------------
+-- 11. Request Responses Ledger Table
 CREATE TABLE IF NOT EXISTS request_responses (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     request_id   INT NOT NULL,
@@ -230,7 +213,6 @@ CREATE TABLE IF NOT EXISTS request_responses (
     responded_at DATETIME NULL,
     donated_at   DATETIME NULL,
     created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
     FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
     UNIQUE (request_id, donor_id)
@@ -238,9 +220,7 @@ CREATE TABLE IF NOT EXISTS request_responses (
 
 CREATE INDEX idx_request_responses_donor ON request_responses(donor_id, status);
 
--- ---------------------------------------------------------------------
--- donation_history — durable ledger, independent of request_responses
--- ---------------------------------------------------------------------
+-- 12. Durable Donation History Table
 CREATE TABLE IF NOT EXISTS donation_history (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     donor_id        INT NOT NULL,
@@ -255,11 +235,79 @@ CREATE TABLE IF NOT EXISTS donation_history (
     FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_donation_history_donor ON donation_history(donor_id, donation_date);
+-- 13. Digital Verified Certificates Table
+CREATE TABLE IF NOT EXISTS certificates (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    certificate_id      VARCHAR(50) NOT NULL UNIQUE,
+    donor_id            INT NOT NULL,
+    donation_history_id INT NULL,
+    qr_code_hash        VARCHAR(255) NOT NULL,
+    pdf_url             VARCHAR(255) NULL,
+    issued_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (donation_history_id) REFERENCES donation_history(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------
--- notifications
--- ---------------------------------------------------------------------
+-- 14. Badges Lookup Table
+CREATE TABLE IF NOT EXISTS badges (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(100) NOT NULL UNIQUE,
+    description   VARCHAR(255) NULL,
+    icon          VARCHAR(100) NULL,
+    criteria_type VARCHAR(50) NOT NULL
+) ENGINE=InnoDB;
+
+-- 15. Donor Earned Badges Table
+CREATE TABLE IF NOT EXISTS donor_badges (
+    id        INT AUTO_INCREMENT PRIMARY KEY,
+    donor_id  INT NOT NULL,
+    badge_id  INT NOT NULL,
+    earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
+    FOREIGN KEY (badge_id) REFERENCES badges(id) ON DELETE CASCADE,
+    UNIQUE (donor_id, badge_id)
+) ENGINE=InnoDB;
+
+-- 16. Donation Camps Table
+CREATE TABLE IF NOT EXISTS donation_camps (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    organizer_user_id  INT NOT NULL,
+    organization_id    INT NULL,
+    title              VARCHAR(150) NOT NULL,
+    description        TEXT NULL,
+    location_name      VARCHAR(255) NOT NULL,
+    address            VARCHAR(255) NULL,
+    city               VARCHAR(100) NOT NULL,
+    state              VARCHAR(100) NULL,
+    location_lat       DECIMAL(10, 8) NULL,
+    location_lng       DECIMAL(11, 8) NULL,
+    start_time         DATETIME NOT NULL,
+    end_time           DATETIME NOT NULL,
+    status             ENUM('upcoming', 'active', 'completed', 'cancelled') DEFAULT 'upcoming',
+    target_units       INT DEFAULT 50,
+    collected_units    INT DEFAULT 0,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (organizer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_donation_camps_city ON donation_camps(city, status);
+
+-- 17. In-App Direct Messages / Chat Log Table
+CREATE TABLE IF NOT EXISTS chats (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    request_id  INT NOT NULL,
+    sender_id   INT NOT NULL,
+    receiver_id INT NOT NULL,
+    message     TEXT NOT NULL,
+    is_read     BOOLEAN DEFAULT FALSE,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 18. In-App Notifications Table
 CREATE TABLE IF NOT EXISTS notifications (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     recipient_id INT NOT NULL,
@@ -276,9 +324,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX idx_notifications_recipient ON notifications(recipient_id, is_read);
 
--- ---------------------------------------------------------------------
--- request_timelines — preserved from V1 (tracking screen depends on it)
--- ---------------------------------------------------------------------
+-- 19. Request Timelines Audit Table
 CREATE TABLE IF NOT EXISTS request_timelines (
     id         INT AUTO_INCREMENT PRIMARY KEY,
     request_id INT NOT NULL,
@@ -290,9 +336,7 @@ CREATE TABLE IF NOT EXISTS request_timelines (
     FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- ---------------------------------------------------------------------
--- otp_logs — every OTP issuance/consumption, for OTP-only auth (Phase 2)
--- ---------------------------------------------------------------------
+-- 20. OTP Security Logs Table
 CREATE TABLE IF NOT EXISTS otp_logs (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     user_id       INT NULL,
@@ -309,9 +353,19 @@ CREATE TABLE IF NOT EXISTS otp_logs (
 
 CREATE INDEX idx_otp_logs_email ON otp_logs(email, purpose, expires_at);
 
--- ---------------------------------------------------------------------
--- activity_logs — lightweight user activity trail (non-security)
--- ---------------------------------------------------------------------
+-- 21. User Trust Scores & Analytics
+CREATE TABLE IF NOT EXISTS trust_scores (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    user_id            INT NOT NULL UNIQUE,
+    trust_score        DECIMAL(5, 2) DEFAULT 100.00,
+    verified_donations INT DEFAULT 0,
+    report_accuracy    DECIMAL(5, 2) DEFAULT 100.00,
+    risk_flag_count    INT DEFAULT 0,
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 22-25. Security & Observability Audit Tables
 CREATE TABLE IF NOT EXISTS activity_logs (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     user_id     INT NOT NULL,
@@ -324,11 +378,6 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_activity_logs_user ON activity_logs(user_id, created_at);
-
--- ---------------------------------------------------------------------
--- audit_logs — security-relevant before/after change trail
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS audit_logs (
     id             INT AUTO_INCREMENT PRIMARY KEY,
     actor_user_id  INT NULL,
@@ -342,151 +391,24 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
-CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
-
--- ---------------------------------------------------------------------
--- socket_sessions — active Socket.io connection tracking
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS socket_sessions (
-    id              INT AUTO_INCREMENT PRIMARY KEY,
-    user_id         INT NOT NULL,
-    socket_id       VARCHAR(100) NOT NULL,
-    connected_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-    disconnected_at DATETIME NULL,
-    last_ping_at    DATETIME NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
-CREATE INDEX idx_socket_sessions_user ON socket_sessions(user_id);
-CREATE INDEX idx_socket_sessions_socket ON socket_sessions(socket_id);
-
--- ---------------------------------------------------------------------
--- ai_matching_logs — every candidate a request was scored against
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS ai_matching_logs (
+CREATE TABLE IF NOT EXISTS analytics_daily (
     id                  INT AUTO_INCREMENT PRIMARY KEY,
-    request_id          INT NOT NULL,
-    donor_id            INT NOT NULL,
-    distance_score      DECIMAL(6, 2) NULL,
-    compatibility_score DECIMAL(6, 2) NULL,
-    availability_score  DECIMAL(6, 2) NULL,
-    history_score       DECIMAL(6, 2) NULL,
-    response_speed_score DECIMAL(6, 2) NULL,
-    final_score         DECIMAL(6, 2) NOT NULL,
-    rank_position        INT NULL,
-    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
-    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
-CREATE INDEX idx_ai_matching_logs_request ON ai_matching_logs(request_id, final_score);
-
--- ---------------------------------------------------------------------
--- blood_banks — blood storage facilities & real-time inventory
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS blood_banks (
-    id                  INT AUTO_INCREMENT PRIMARY KEY,
-    hospital_profile_id INT NULL,
-    name                VARCHAR(150) NOT NULL,
-    address             VARCHAR(255) NULL,
-    city                VARCHAR(100) NOT NULL,
-    state               VARCHAR(100) NULL,
-    pincode             VARCHAR(20) NULL,
-    location_lat        DECIMAL(10, 8) NULL,
-    location_lng        DECIMAL(11, 8) NULL,
-    contact_number      VARCHAR(20) NULL,
-    units_available     JSON NULL,
-    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (hospital_profile_id) REFERENCES hospital_profiles(id) ON DELETE SET NULL
-) ENGINE=InnoDB;
-
-CREATE INDEX idx_blood_banks_location ON blood_banks(location_lat, location_lng);
-
--- ---------------------------------------------------------------------
--- donation_camps — blood drive events organized by NGOs / Hospitals
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS donation_camps (
-    id                 INT AUTO_INCREMENT PRIMARY KEY,
-    organizer_user_id  INT NOT NULL,
-    title              VARCHAR(150) NOT NULL,
-    description        TEXT NULL,
-    location_name      VARCHAR(255) NOT NULL,
-    address            VARCHAR(255) NULL,
-    city               VARCHAR(100) NOT NULL,
-    state              VARCHAR(100) NULL,
-    location_lat       DECIMAL(10, 8) NULL,
-    location_lng       DECIMAL(11, 8) NULL,
-    start_time         DATETIME NOT NULL,
-    end_time           DATETIME NOT NULL,
-    status             ENUM('upcoming', 'active', 'completed', 'cancelled') DEFAULT 'upcoming',
-    target_units       INT DEFAULT 50,
-    collected_units    INT DEFAULT 0,
-    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (organizer_user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
-CREATE INDEX idx_donation_camps_city ON donation_camps(city, status);
-
--- ---------------------------------------------------------------------
--- certificates — verified digital donation certificates with QR hashes
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS certificates (
-    id                  INT AUTO_INCREMENT PRIMARY KEY,
-    certificate_id      VARCHAR(50) NOT NULL UNIQUE,
-    donor_id            INT NOT NULL,
-    donation_history_id INT NULL,
-    qr_code_hash        VARCHAR(255) NOT NULL,
-    pdf_url             VARCHAR(255) NULL,
-    issued_at           DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
-    FOREIGN KEY (donation_history_id) REFERENCES donation_history(id) ON DELETE SET NULL
-) ENGINE=InnoDB;
-
--- ---------------------------------------------------------------------
--- badges & donor_badges — gamification & recognition achievements
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS badges (
-    id            INT AUTO_INCREMENT PRIMARY KEY,
-    name          VARCHAR(100) NOT NULL UNIQUE,
-    description   VARCHAR(255) NULL,
-    icon          VARCHAR(100) NULL,
-    criteria_type VARCHAR(50) NOT NULL
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS donor_badges (
-    id        INT AUTO_INCREMENT PRIMARY KEY,
-    donor_id  INT NOT NULL,
-    badge_id  INT NOT NULL,
-    earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (donor_id) REFERENCES donor_profiles(id) ON DELETE CASCADE,
-    FOREIGN KEY (badge_id) REFERENCES badges(id) ON DELETE CASCADE,
-    UNIQUE (donor_id, badge_id)
-) ENGINE=InnoDB;
-
--- ---------------------------------------------------------------------
--- chats — messaging log between requester and responding donor
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS chats (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    request_id  INT NOT NULL,
-    sender_id   INT NOT NULL,
-    receiver_id INT NOT NULL,
-    message     TEXT NOT NULL,
-    is_read     BOOLEAN DEFAULT FALSE,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (request_id) REFERENCES blood_requests(id) ON DELETE CASCADE,
-    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+    metric_date         DATE NOT NULL UNIQUE,
+    total_donations     INT DEFAULT 0,
+    active_requests     INT DEFAULT 0,
+    fulfilled_requests  INT DEFAULT 0,
+    active_donors       INT DEFAULT 0,
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- ---------------------------------------------------------------------
--- Seed the fixed role list (idempotent)
--- ---------------------------------------------------------------------
+-- Seed Idempotent Roles
 INSERT INTO roles (name, description) VALUES
     ('donor', 'Can respond to blood requests and donate'),
     ('patient', 'Can create blood requests for themselves or a dependent'),
     ('hospital', 'Verified hospital/blood bank account'),
-    ('admin', 'Platform administrator')
+    ('admin', 'Platform administrator'),
+    ('volunteer', 'Verified event & camp coordinator'),
+    ('organization', 'NGO / Corporate / College partner account')
 ON DUPLICATE KEY UPDATE description = VALUES(description);
