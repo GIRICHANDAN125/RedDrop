@@ -62,6 +62,9 @@ const Input = ({
           multiline={multiline}
           numberOfLines={numberOfLines}
           editable={!disabled}
+          accessible={true}
+          accessibilityLabel={label || placeholder}
+          accessibilityHint={error || hint || placeholder}
           style={[
             styles.input,
             icon && styles.inputWithLeftIcon,

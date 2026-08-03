@@ -1,15 +1,20 @@
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Colors, Radius, Shadows } from '../../utils/theme';
 
-const Card = ({
+const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
+
+const Card = React.memo(({
   children,
   style,
   onPress,
   variant = 'default',
   padding = 16,
   glass = false,
-  glow = false
+  glow = false,
+  animate = true,
+  index = 0
 }) => {
   const variants = {
     default: { backgroundColor: Colors.bgCard, borderColor: Colors.glassBorder },
@@ -32,16 +37,29 @@ const Card = ({
     style
   ];
 
+  const entering = animate ? FadeInDown.delay(Math.min(index, 5) * 40).duration(300) : undefined;
+
   if (onPress) {
     return (
-      <TouchableOpacity onPress={onPress} activeOpacity={0.8} style={cardStyle}>
+      <AnimatedTouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.8}
+        entering={entering}
+        accessible={true}
+        accessibilityRole="button"
+        style={cardStyle}
+      >
         {children}
-      </TouchableOpacity>
+      </AnimatedTouchableOpacity>
     );
   }
 
-  return <View style={cardStyle}>{children}</View>;
-};
+  return (
+    <Animated.View entering={entering} style={cardStyle}>
+      {children}
+    </Animated.View>
+  );
+});
 
 const styles = StyleSheet.create({
   card: {
@@ -57,7 +75,7 @@ const styles = StyleSheet.create({
   glow: {
     shadowColor: Colors.primary,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
     shadowRadius: 20,
     elevation: 10
   }

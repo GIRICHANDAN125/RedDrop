@@ -91,6 +91,10 @@ const Button = ({
       onPress={handlePress}
       disabled={disabled || loading}
       activeOpacity={1}
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
       style={[
         styles.base,
         {
