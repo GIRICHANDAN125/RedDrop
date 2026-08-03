@@ -16,6 +16,8 @@ const rateLimit = require('express-rate-limit');
 
 const { connectDB } = require('./config/database');
 const { initSocket } = require('./config/socket');
+const ResponseUtil = require('./utils/response');
+const errorHandler = require('./middleware/error.middleware');
 
 // Route imports
 const authRoutes = require('./routes/auth.routes');
@@ -43,7 +45,13 @@ app.use(compression());
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100,
-  message: { error: 'Too many requests, please try again later.' }
+  handler: (req, res) => {
+    return ResponseUtil.error(res, {
+      code: 429,
+      type: 'TOO_MANY_REQUESTS',
+      message: 'Too many requests, please try again later.'
+    });
+  }
 });
 app.use('/api/', limiter);
 
@@ -89,18 +97,15 @@ app.use('/api/reports', reportRoutes);
 
 // 404 handler
 app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  return ResponseUtil.error(res, {
+    code: 404,
+    type: 'NOT_FOUND',
+    message: `Route '${req.originalUrl}' not found.`
+  });
 });
 
 // Global error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
-  const statusCode = err.statusCode || 500;
-  res.status(statusCode).json({
-    error: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
-});
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
