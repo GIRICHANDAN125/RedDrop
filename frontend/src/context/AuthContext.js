@@ -1,10 +1,37 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { api } from '../api/client';
 
 const VERIFY_TIMEOUT_MS = 5000;
 
 const AuthContext = createContext(null);
+
+// Safe SecureStore wrapper — expo-secure-store is not supported on Web
+const SecureStorage = {
+  async getItem(key) {
+    if (Platform.OS === 'web') {
+      try { return localStorage.getItem(key); } catch { return null; }
+    }
+    const SecureStore = require('expo-secure-store');
+    return SecureStore.getItemAsync(key);
+  },
+  async setItem(key, value) {
+    if (Platform.OS === 'web') {
+      try { localStorage.setItem(key, value); } catch {}
+      return;
+    }
+    const SecureStore = require('expo-secure-store');
+    return SecureStore.setItemAsync(key, value);
+  },
+  async deleteItem(key) {
+    if (Platform.OS === 'web') {
+      try { localStorage.removeItem(key); } catch {}
+      return;
+    }
+    const SecureStore = require('expo-secure-store');
+    return SecureStore.deleteItemAsync(key);
+  }
+};
 
 const initialState = {
   user: null,
@@ -43,8 +70,8 @@ function authReducer(state, action) {
     case 'VERIFY_SUCCESS':
       return {
         ...state,
-        user: state.pendingAuth?.user ?? state.user,
-        token: state.pendingAuth?.token ?? state.token,
+        user: state.pendingAuth?.user ?? action.payload?.user ?? state.user,
+        token: state.pendingAuth?.token ?? action.payload?.token ?? state.token,
         isAuthenticated: true,
         requiresVerification: false,
         pendingAuth: null,
@@ -71,17 +98,15 @@ export const AuthProvider = ({ children }) => {
 
   const loadStoredAuth = async () => {
     try {
-      const [token, userStr] = await Promise.all([
-        SecureStore.getItemAsync('auth_token'),
-        SecureStore.getItemAsync('auth_user')
-      ]);
+      const token = await SecureStorage.getItem('auth_token');
+      const userStr = await SecureStorage.getItem('auth_user');
 
       if (token && userStr) {
         const user = JSON.parse(userStr);
         api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         dispatch({ type: 'LOGIN_SUCCESS', payload: { user, token } });
 
-        // Verify token in the background so startup is never blocked by the backend.
+        // Verify token in background — never blocks startup
         void api.get('/auth/me', { timeout: VERIFY_TIMEOUT_MS })
           .then((response) => {
             if (response?.data?.user) {
@@ -131,13 +156,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const completePendingVerification = async () => {
-    if (!state.pendingAuth?.token || !state.pendingAuth?.user) {
-      return false;
+  const completePendingVerification = async (freshData = null) => {
+    const token = freshData?.token || state.pendingAuth?.token;
+    const user = freshData?.user || state.pendingAuth?.user;
+
+    if (!token || !user) {
+      // Still dispatch verify success to allow navigation — user can refresh /me
+      dispatch({ type: 'VERIFY_SUCCESS', payload: { token: null, user: null } });
+      return true;
     }
 
-    await saveAuth(state.pendingAuth.token, state.pendingAuth.user);
-    dispatch({ type: 'VERIFY_SUCCESS' });
+    await saveAuth(token, user);
+    dispatch({ type: 'VERIFY_SUCCESS', payload: { token, user } });
     return true;
   };
 
@@ -148,22 +178,22 @@ export const AuthProvider = ({ children }) => {
 
   const updateUser = (updates) => {
     dispatch({ type: 'UPDATE_USER', payload: updates });
-    SecureStore.setItemAsync('auth_user', JSON.stringify({ ...state.user, ...updates }));
+    SecureStorage.setItem('auth_user', JSON.stringify({ ...state.user, ...updates }));
   };
 
   const saveAuth = async (token, user) => {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     await Promise.all([
-      SecureStore.setItemAsync('auth_token', token),
-      SecureStore.setItemAsync('auth_user', JSON.stringify(user))
+      SecureStorage.setItem('auth_token', token),
+      SecureStorage.setItem('auth_user', JSON.stringify(user))
     ]);
   };
 
   const clearAuth = async () => {
     delete api.defaults.headers.common['Authorization'];
     await Promise.all([
-      SecureStore.deleteItemAsync('auth_token'),
-      SecureStore.deleteItemAsync('auth_user')
+      SecureStorage.deleteItem('auth_token'),
+      SecureStorage.deleteItem('auth_user')
     ]);
   };
 

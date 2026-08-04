@@ -145,33 +145,44 @@ exports.login = async (req, res) => {
 exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp, purpose } = req.body;
+    Logger.info(`OTP verification attempt for ${email}, purpose: ${purpose}`);
 
     const user = await userRepository.findByEmail(email || null);
     if (!user) return res.status(404).json({ error: 'User not found.' });
 
-    const { valid, record, reason } = await otpRepository.verifyOtp(email, otp, purpose || 'email_verify');
+    const otpPurpose = purpose || 'email_verify';
+    const { valid, record, reason } = await otpRepository.verifyOtp(email, otp, otpPurpose);
 
     if (!valid) {
       if (reason === 'expired') return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
-      return res.status(400).json({ error: 'Invalid OTP.' });
+      if (reason === 'not_found') return res.status(400).json({ error: 'OTP not found. Please request a new OTP.' });
+      return res.status(400).json({ error: 'Invalid OTP. Please check the code and try again.' });
     }
 
     // Consume the OTP
     await otpRepository.consumeOtp(record.id);
 
-    if (purpose === 'email_verify') {
+    if (otpPurpose === 'email_verify' || otpPurpose === 'signup') {
       await userRepository.markEmailVerified(user.id);
-
-      await createNotification(user.id, {
-        type: 'verification_approved',
-        title: '✅ Account Verified!',
-        body: 'Your Red Drop AI account is now verified.'
-      });
+      // Notify in background — do not block verification
+      try {
+        await createNotification(user.id, {
+          type: 'verification_approved',
+          title: '✅ Account Verified!',
+          body: 'Your Red Drop AI account is now verified.'
+        });
+      } catch {}
     }
 
-    res.json({ success: true, message: 'OTP verified successfully!' });
+    // Return fresh token so frontend can complete auth without re-login
+    const roles = await roleRepository.getRoleNamesForUser(user.id);
+    const token = generateToken(user.id, roles);
+    const fullUser = await userRepository.findFullProfileById(user.id);
+
+    Logger.info(`OTP verified successfully for ${email}`);
+    res.json({ success: true, message: 'OTP verified successfully!', token, user: fullUser });
   } catch (error) {
-    console.error('OTP verification error:', error);
+    Logger.error('OTP verification error', { error: error.message });
     res.status(500).json({ error: 'OTP verification failed.' });
   }
 };

@@ -60,14 +60,20 @@ const OTPVerificationScreen = ({ navigation, route }) => {
     setLoading(true);
     setError('');
     try {
-      await authAPI.verifyOTP({ email, otp: otpString, purpose });
+      const response = await authAPI.verifyOTP({ email, otp: otpString, purpose });
+      const data = response?.data || {};
+
       if (purpose === 'password_reset') {
         navigation.navigate('ResetPassword', { email, otp: otpString });
       } else {
-        await completePendingVerification();
+        // Pass fresh token & user from server so auth works even if pendingAuth was lost
+        await completePendingVerification(
+          data.token && data.user ? { token: data.token, user: data.user } : null
+        );
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid OTP. Please try again.');
+      const msg = err.response?.data?.error || 'Invalid OTP. Please try again.';
+      setError(msg);
       shake();
       setOtp(['', '', '', '', '', '']);
       inputs.current[0]?.focus();
