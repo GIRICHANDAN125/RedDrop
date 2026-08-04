@@ -5,6 +5,7 @@ const roleRepository = require('../repositories/role.repository');
 const otpRepository = require('../repositories/otp.repository');
 const { sendEmail } = require('../services/email.service');
 const { createNotification } = require('../services/notification.service');
+const Logger = require('../utils/logger');
 
 const generateToken = (id, roles) => {
   return jwt.sign({ id, roles }, process.env.JWT_SECRET, {
@@ -20,6 +21,7 @@ const generateOTP = () => {
 exports.register = async (req, res) => {
   try {
     const { name, email, phone, password, role, bloodGroup } = req.body;
+    Logger.info(`Registration attempt for email: ${email}`);
 
     // Check if email already exists (users table)
     const existingUser = await userRepository.findByEmail(email || null);
@@ -39,7 +41,7 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // Create auth user row
-    const userId = await userRepository.createAuthUser({ email, emailVerified: false });
+    const userId = await userRepository.createAuthUser({ name, email, emailVerified: false });
 
     // Store hashed password directly
     await userRepository.updateById(userId, { password: hashedPassword });

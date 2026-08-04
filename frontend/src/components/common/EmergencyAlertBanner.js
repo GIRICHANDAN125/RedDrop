@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Platform } from 'react-native';
 import Animated, {
   useSharedValue, useAnimatedStyle,
   withSpring, withRepeat, withTiming, withSequence
@@ -19,7 +19,9 @@ const EmergencyAlertBanner = ({ request, onPress, onDismiss }) => {
     // Pulse glow
     glow.value = withRepeat(withTiming(1, { duration: 800 }), -1, true);
     // Haptic alert
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    }
 
     // Auto dismiss after 8 seconds
     const timer = setTimeout(() => {
