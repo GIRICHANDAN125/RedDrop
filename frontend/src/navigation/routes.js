@@ -4,6 +4,7 @@
  */
 export const ROUTES = {
   // Auth Stack
+  ONBOARDING: 'Onboarding',
   LOGIN: 'Login',
   REGISTER: 'Register',
   OTP_VERIFICATION: 'OTPVerification',
@@ -19,6 +20,9 @@ export const ROUTES = {
   // Feature Screens
   DONOR_PROFILE: 'DonorProfile',
   HOSPITAL_DASHBOARD: 'HospitalDashboard',
+  CAMP_DISCOVERY: 'CampDiscovery',
+  CERTIFICATES: 'Certificates',
+  COMMUNITY: 'Community',
   TRACKING: 'Tracking',
   CAMP_DETAIL: 'CampDetail',
   CERTIFICATE_DETAIL: 'CertificateDetail',

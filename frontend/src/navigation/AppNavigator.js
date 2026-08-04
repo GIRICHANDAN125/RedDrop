@@ -6,6 +6,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 
 // Auth Screens
+import OnboardingScreen from '../screens/auth/OnboardingScreen';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegisterScreen from '../screens/auth/RegisterScreen';
 import OTPVerificationScreen from '../screens/auth/OTPVerificationScreen';
@@ -21,6 +22,13 @@ import DonorProfileScreen from '../screens/donor/DonorProfileScreen';
 import ProfileScreen from '../screens/shared/ProfileScreen';
 import RequestDetailScreen from '../screens/shared/RequestDetailScreen';
 import RequestsScreen from '../screens/shared/RequestsScreen';
+
+// Feature Hub Screens
+import HospitalDashboardScreen from '../screens/hospital/HospitalDashboardScreen';
+import CampDiscoveryScreen from '../screens/camps/CampDiscoveryScreen';
+import CertificatesScreen from '../screens/certificates/CertificatesScreen';
+import CommunityScreen from '../screens/community/CommunityScreen';
+import AIAssistantScreen from '../screens/shared/AIAssistantScreen';
 
 import { Colors, Typography, Radius } from '../utils/theme';
 
@@ -86,6 +94,7 @@ function TabNavigator() {
 function AuthStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Onboarding" component={OnboardingScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
@@ -106,6 +115,11 @@ function MainStack() {
       <Stack.Screen name="TrackRequest" component={TrackingScreen} />
       <Stack.Screen name="RequestDetail" component={RequestDetailScreen} />
       <Stack.Screen name="Requests" component={RequestsScreen} />
+      <Stack.Screen name="HospitalDashboard" component={HospitalDashboardScreen} />
+      <Stack.Screen name="CampDiscovery" component={CampDiscoveryScreen} />
+      <Stack.Screen name="Certificates" component={CertificatesScreen} />
+      <Stack.Screen name="Community" component={CommunityScreen} />
+      <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
     </Stack.Navigator>
   );
 }

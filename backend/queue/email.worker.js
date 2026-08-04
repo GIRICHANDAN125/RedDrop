@@ -1,14 +1,18 @@
+const QueueService = require('../services/queue.service');
+const emailService = require('../services/email.service');
+const Logger = require('../utils/logger');
+
 /**
- * Email Background Worker — processes queued email dispatch jobs (RedDrop AI V2)
- * Consumes jobs from queue.service.js and delegates to email.service.js
+ * Email Background Worker
+ * Processes email dispatch jobs asynchronously.
  */
-// TODO: integrate with BullMQ or similar queue library
-// const { emailQueue } = require('../services/queue.service');
-// const emailService = require('../services/email.service');
+class EmailWorker {
+  static dispatchEmail(to, subject, template, data) {
+    QueueService.enqueue('EMAIL_DISPATCH', { to, subject, template, data }, async (payload) => {
+      Logger.info(`Sending email to ${payload.to}`, { subject: payload.subject });
+      await emailService.sendEmail(payload);
+    });
+  }
+}
 
-// emailQueue.process(async (job) => {
-//   const { to, subject, template, data } = job.data;
-//   await emailService.send({ to, subject, template, data });
-// });
-
-module.exports = {};
+module.exports = EmailWorker;

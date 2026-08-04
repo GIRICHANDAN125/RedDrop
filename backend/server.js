@@ -29,6 +29,14 @@ const hospitalRoutes = require('./routes/hospital.routes');
 const reportRoutes = require('./routes/report.routes');
 const userRoutes = require('./routes/user.routes');
 
+// V2 Route imports
+const hospitalV2Routes = require('./routes/v2/hospital.routes');
+const campV2Routes = require('./routes/v2/camp.routes');
+const certificateV2Routes = require('./routes/v2/certificate.routes');
+const aiV2Routes = require('./routes/v2/ai.routes');
+const communityV2Routes = require('./routes/v2/community.routes');
+
+
 const app = express();
 const server = http.createServer(app);
 
@@ -94,6 +102,14 @@ app.use('/api/tracking', trackingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/hospitals', hospitalRoutes);
 app.use('/api/reports', reportRoutes);
+
+// V2 API Routes
+app.use('/api/v2/hospitals', hospitalV2Routes);
+app.use('/api/v2/camps', campV2Routes);
+app.use('/api/v2/certificates', certificateV2Routes);
+app.use('/api/v2/ai', aiV2Routes);
+app.use('/api/v2/community', communityV2Routes);
+
 
 // 404 handler
 app.use('*', (req, res) => {

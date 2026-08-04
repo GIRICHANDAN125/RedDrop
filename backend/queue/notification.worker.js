@@ -1,14 +1,25 @@
+const QueueService = require('../services/queue.service');
+const notificationService = require('../services/notification.service');
+const Logger = require('../utils/logger');
+
 /**
- * Notification Background Worker — processes queued Socket.IO & push notification jobs (RedDrop AI V2)
- * Consumes jobs from queue.service.js and delegates to notification.service.js
+ * Notification Background Worker
+ * Processes push & in-app notification jobs asynchronously.
  */
-// TODO: integrate with BullMQ or similar queue library
-// const { notificationQueue } = require('../services/queue.service');
-// const notificationService = require('../services/notification.service');
+class NotificationWorker {
+  static dispatchNotification(userId, data) {
+    QueueService.enqueue('NOTIFICATION_DISPATCH', { userId, data }, async (payload) => {
+      Logger.info(`Dispatching notification to user ${payload.userId}`);
+      await notificationService.createNotification(payload.userId, payload.data);
+    });
+  }
 
-// notificationQueue.process(async (job) => {
-//   const { userId, type, payload } = job.data;
-//   await notificationService.dispatch(userId, type, payload);
-// });
+  static notifyNearby(donors, request) {
+    QueueService.enqueue('NEARBY_DONORS_NOTIFY', { donors, request }, async (payload) => {
+      Logger.info(`Notifying ${payload.donors.length} nearby donors for request ${payload.request.id}`);
+      await notificationService.notifyNearbyDonors(payload.donors, payload.request);
+    });
+  }
+}
 
-module.exports = {};
+module.exports = NotificationWorker;
