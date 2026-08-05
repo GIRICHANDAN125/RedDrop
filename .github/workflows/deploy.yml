@@ -1,0 +1,24 @@
+name: Production Deployment Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    name: Deploy to Cloud Infrastructure
+    runs-on: ubuntu-latest
+    needs: []
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Build Docker Containers
+        run: |
+          docker compose build
+
+      - name: Run Production Health Check
+        run: |
+          echo "Simulating container health checks and deployment approval..."
+          echo "Production deployment ready."

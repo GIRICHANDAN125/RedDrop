@@ -8,7 +8,8 @@
     "postinstall": "node scripts/fix-expo-externals.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test": "npx jest --passWithNoTests"
   },
   "dependencies": {
     "@expo/metro-runtime": "~3.1.3",
