@@ -1,19 +1,24 @@
 const campRepository = require('../repositories/camp.repository');
+const campRegistrationRepository = require('../repositories/campRegistration.repository');
 const QueueService = require('./queue.service');
 const Logger = require('../utils/logger');
+const { emitToLocation } = require('../config/socket');
 
 class CampService {
   async listCamps(query = {}) {
     return await campRepository.findUpcoming({
       city: query.city,
-      limit: query.limit || 20
+      state: query.state,
+      limit: parseInt(query.limit) || 20
     });
   }
 
   async getById(id) {
     const camp = await campRepository.findById(id);
     if (!camp) {
-      throw { statusCode: 404, message: 'Donation camp not found.' };
+      const err = new Error('Donation camp not found.');
+      err.statusCode = 404;
+      throw err;
     }
     return camp;
   }
@@ -35,11 +40,73 @@ class CampService {
 
     Logger.info(`Camp created: ${campId}`, { userId });
 
+    const camp = await this.getById(campId);
+
+    // Broadcast to location room via Socket.IO
+    emitToLocation(camp.city, camp.state || '', 'camp:new', {
+      campId,
+      title: camp.title,
+      city: camp.city,
+      startTime: camp.start_time
+    });
+
     QueueService.enqueue('CAMP_CREATED_NOTIFICATION', { campId, city: data.city }, async (payload) => {
       Logger.info(`Broadcasted new camp alert for city ${payload.city}`);
     });
 
-    return await this.getById(campId);
+    return camp;
+  }
+
+  /**
+   * Register a user for a camp. Generates a unique QR token.
+   */
+  async registerForCamp(campId, userId) {
+    const camp = await this.getById(campId);
+
+    if (camp.status === 'completed' || camp.status === 'cancelled') {
+      const err = new Error('This camp is no longer accepting registrations.');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const registration = await campRegistrationRepository.registerUserForCamp(campId, userId);
+    return { registration, camp };
+  }
+
+  /**
+   * QR Check-in for a camp registration.
+   */
+  async checkIn(qrToken) {
+    const registration = await campRegistrationRepository.findByQrToken(qrToken);
+    if (!registration) {
+      const err = new Error('Invalid QR code. Registration not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (registration.status !== 'registered') {
+      return { alreadyCheckedIn: true, registration };
+    }
+    await campRegistrationRepository.checkIn(qrToken);
+
+    // Emit real-time update
+    emitToLocation(registration.city, '', 'camp:checkin', { campId: registration.camp_id, userId: registration.user_id });
+
+    return { alreadyCheckedIn: false, registration };
+  }
+
+  /**
+   * Get registrations for a camp.
+   */
+  async getCampRegistrations(campId) {
+    await this.getById(campId);
+    return await campRegistrationRepository.getRegistrationsForCamp(campId);
+  }
+
+  /**
+   * Get all camp registrations for a user.
+   */
+  async getMyRegistrations(userId) {
+    return await campRegistrationRepository.getRegistrationsForUser(userId);
   }
 }
 

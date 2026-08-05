@@ -45,6 +45,22 @@ class HospitalRepository extends BaseRepository {
     );
     return rows;
   }
+
+  /**
+   * Find all verified hospitals (for listing when no location given).
+   */
+  async findAllVerified(limit = 20) {
+    const [rows] = await pool.execute(
+      `SELECT hp.*, u.email
+       FROM hospital_profiles hp
+       JOIN users u ON hp.user_id = u.id
+       WHERE hp.is_verified = 1
+       ORDER BY hp.created_at DESC
+       LIMIT ?`,
+      [parseInt(limit)]
+    );
+    return rows;
+  }
 }
 
 module.exports = new HospitalRepository();

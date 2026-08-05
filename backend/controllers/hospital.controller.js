@@ -24,7 +24,17 @@ module.exports = {
     }
   },
 
-  // GET /api/v2/hospitals/:id/inventory or GET /api/v2/hospitals/inventory
+  // GET /api/v2/hospitals/blood-banks
+  listBloodBanks: async (req, res, next) => {
+    try {
+      const banks = await hospitalService.listBloodBanks(req.query);
+      return ResponseUtil.success(res, { message: 'Blood banks retrieved successfully.', data: banks });
+    } catch (err) {
+      next(err);
+    }
+  },
+
+  // GET /api/v2/hospitals/inventory
   getInventory: async (req, res, next) => {
     try {
       const dashboard = await hospitalService.getDashboardData(req.user.id);

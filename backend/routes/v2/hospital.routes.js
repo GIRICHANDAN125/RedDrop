@@ -3,6 +3,9 @@ const router = express.Router();
 const hospitalController = require('../../controllers/hospital.controller');
 const { authenticate, authorize } = require('../../middleware/auth.middleware');
 
+// GET /api/v2/hospitals/blood-banks — must be before /:id
+router.get('/blood-banks', hospitalController.listBloodBanks);
+
 // GET /api/v2/hospitals/dashboard
 router.get('/dashboard', authenticate, hospitalController.getDashboard);
 
