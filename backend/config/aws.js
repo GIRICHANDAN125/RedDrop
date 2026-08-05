@@ -1,14 +1,14 @@
 const { S3Client, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
-const region = process.env.AWS_REGION;
-const bucketName = process.env.AWS_BUCKET_NAME;
+const region = process.env.AWS_REGION || 'us-east-1';
+const bucketName = process.env.AWS_BUCKET_NAME || 'reddropai-uploads';
 
 const s3 = new S3Client({
   region,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'dummy_access_key',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'dummy_secret_key'
   }
 });
 

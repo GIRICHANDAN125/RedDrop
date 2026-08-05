@@ -2,9 +2,9 @@
 -- RedDrop AI V2 — Complete Frozen Production Schema
 -- =====================================================================
 
-CREATE DATABASE IF NOT EXISTS reddropai_v2
+CREATE DATABASE IF NOT EXISTS reddropai
     CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE reddropai_v2;
+USE reddropai;
 
 SET FOREIGN_KEY_CHECKS = 0;
 

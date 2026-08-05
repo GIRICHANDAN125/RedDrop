@@ -40,7 +40,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage: multerS3({
     s3,
-    bucket: bucketName,
+    bucket: bucketName || process.env.AWS_BUCKET_NAME || 'reddropai-uploads',
     acl: 'private',
     contentType: multerS3.AUTO_CONTENT_TYPE,
     metadata: (req, file, cb) => {

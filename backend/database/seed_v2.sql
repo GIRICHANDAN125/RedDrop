@@ -5,7 +5,7 @@
 -- Do NOT run this against a production database.
 -- =====================================================================
 
-USE reddropai_v2;
+USE reddropai;
 
 -- Roles are already seeded by schema_v2.sql. Re-asserted here defensively
 -- in case this file is ever run standalone against an empty schema.
